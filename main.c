@@ -21,10 +21,10 @@ const int ScreenHeight = 800;
 int border = 10;
 
 // Number of start bacteria
-int bacteria_counter = 1000;
+int bacteria_counter = 10;
 
 // Pause button
-bool pause = false;
+bool pause = true;
 //---------------------------------
 
 /*  Type of cells:
@@ -34,27 +34,41 @@ bool pause = false;
 */
 typedef struct
 {
-    char  type;
+    char type;
     Color color;
 }micro_type;
 
+// Simple DNA structure
 typedef struct
 {
-    float speed;
-    float multiply_rate;
-    Color color;
-}type_bacteria;
+    int ma_width;
+    int ma_height;
+    int **matrix;
+}DNA;
 
 typedef struct
 {
+    int   health;
+    float speed;
+    float multiply_rate;
+    Color color;
+    DNA   DNA;
+}type_bacteria;
+
+typedef struct Type Type;
+
+typedef struct Type
+{
+    char    type;
     int     index;
+    Color   color;
     union
     {
         micro_type    inanimate;
         type_bacteria bacterium;
     };
-    struct Type    *next;
-}Type;
+    Type    *next;
+};
 
 // Coordinates register
 typedef struct
@@ -71,35 +85,71 @@ void menu();
 int random(int n);
 
 // Add an object in list
-void add_object(Type **objects, int index, char type);
+void add_object(Type **objects, int *index, char type);
 
 // Generate type
-void generate_type(int ***world, Type **objects, int n, char type);
+void generate_type(int ***world, Type **objects, int *index, int n, char type);
+
+// Genetics
+//-------------------------------------------------
+DNA gen_DNA(int width, int height)
+{
+    DNA DNA;
+    DNA.ma_width = width,  DNA.ma_height = height;
+    DNA.matrix = malloc(sizeof(int*) * height);
+
+    for(int i = 0; i < height; i++)
+    {
+        //printf("\n");
+        DNA.matrix[i] = malloc(sizeof(int) * width);
+        for(int j = 0; j < width; j++)
+        {
+            DNA.matrix[i][j] = random(4);
+            //printf("%d\t", DNA.matrix[i][j]);
+        }
+    }
+    //printf("\n");
+
+    return DNA;
+}
+//-------------------------------------------------
+
+/*// Decrementation health
+void decr_health()
+{
+
+}*/
 
 // Extract object from list
-void extract_by_index(void **obj, Type *objects, int index);
+Type extract_by_index(Type **objects, int index);
+
+// Destroy object
+void destr_object(Type **objects, int index);
 
 // Register
-//-----------------------------------------------------------------
+//-----------------------------------------------
 // Add data in register
-Coord_Reg * add_in_reg(Coord_Reg *reg, int x, int y)
-{
-    if(reg == NULL)
-    {
-        reg = malloc(sizeof(Coord_Reg));
-        reg->x = x, reg->y = y;
-        return reg;
-    }
-}
+void add_in_reg(Coord_Reg **reg, int x, int y);
 
-
-//-----------------------------------------------------------------
+// Verify if coordinate are contains in register
+bool verify_reg(Coord_Reg *reg, int x, int y);
+//-----------------------------------------------
 
 // Give some behavior to every bacterium
-void bacterium_behavior(int *x, int *y, float speed);
+void bacterium_behavior(int *x, int *y, int rand_num, float speed);
 
 // Draw statistic of selected bacteria
 void draw_bacterium_stats(int x, int y, int index, int size);
+
+void print_obj(Type *objects)
+{
+    while(objects != NULL)
+    {
+        printf("(%d, %c)\n", objects->index, objects->type);
+        objects = objects->next;
+    }
+    printf("\n");
+}
 
 // Main
 int main()
@@ -110,10 +160,10 @@ int main()
     int **world;
 
     // Allocation memory to world's matrix
-    world = malloc(sizeof(micro_type*) * ScreenWidth);
+    world = malloc(sizeof(int*) * ScreenWidth);
 
     for(int i = 0; i < ScreenWidth; i++)
-        world[i] = malloc(sizeof(micro_type) * ScreenHeight);
+        world[i] = malloc(sizeof(int) * ScreenHeight);
 
     // Initialize world
     for(int i = 0; i < ScreenWidth; i++)
@@ -123,8 +173,9 @@ int main()
 
     // List with objects
     Type *objects = NULL;
-    add_object(&objects, 1, food);
-    add_object(&objects, 2, bacteria);
+
+    // Objects Indexes
+    int index = 1;
 
     // Statistics used for draw_bacterium_stats
     /*type_bacteria stats;
@@ -136,8 +187,8 @@ int main()
 
     // Generate bacteria and food
     //----------------------------------------------------------
-    generate_type(&world, &objects, 100, food);
-    generate_type(&world, &objects, bacteria_counter, bacteria);
+    generate_type(&world, &objects, &index, 10, food);
+    generate_type(&world, &objects, &index, bacteria_counter, bacteria);
     //----------------------------------------------------------
 
     // Start with Main Menu
@@ -146,18 +197,20 @@ int main()
     // Temporal variables
     //--------------------------------------------------
     int   x, y;
-    void *obj;
+    int   temp;
+    Type obj;
 
-    // Extract food's object
-    extract_by_index(&obj, objects, 1);
-    micro_type obj_food = *((micro_type*)obj);
+    //print_obj(objects);
 
-    // Extract bacteria's object
-    extract_by_index(&obj, objects, 2);
-    type_bacteria obj_bacteria = *((type_bacteria*)obj);
+    // Food's object
+    micro_type obj_food;
+
+    // Bacteria's object
+    type_bacteria obj_bacteria;
     //--------------------------------------------------
 
-    Coord_Reg *reg;
+    // Register
+    Coord_Reg *reg = NULL;
 
     while(!WindowShouldClose())
     {
@@ -166,28 +219,55 @@ int main()
 
             for(int i = 0; i < ScreenWidth; i++)
                 for(int j = 0; j < ScreenHeight; j++)
-                    if(world[i][j] == 1)
-                        DrawCircle(i, j, 2, obj_food.color);
-                    else if(world[i][j] == 2)
+                    if(world[i][j] != 0)
                     {
-                        x = i, y = j;
-                        bacterium_behavior(&x, &y, obj_bacteria.speed);
-                        DrawRectangle(x, y, 3, 3, obj_bacteria.color);
+                        obj = extract_by_index(&objects, world[i][j]);
+                        //printf("main - (%d)\n", obj.index);
+                        if(obj.type != space)
+                            if(obj.type == food)
+                            {
+                                obj_food = obj.inanimate;
+                                //printf("%d == %d\n", ColorToInt(LIME), ColorToInt(obj_food.color));
+                                DrawCircle(i, j, 2, obj_food.color);
+                            }
+                            else if(obj.type == bacteria)
+                            {
+                                obj_bacteria = obj.bacterium;
+                                x = i, y = j;
+                                if(!verify_reg(reg, x, y))
+                                {
+                                    for(int m = 0; m < obj_bacteria.DNA.ma_height; m++)
+                                        for(int n = 0; n < obj_bacteria.DNA.ma_width; n++)
+                                        {
+                                            bacterium_behavior(&x, &y, obj_bacteria.DNA.matrix[m][n], obj_bacteria.speed);
+                                            DrawRectangle(x, y, 3, 3, obj_bacteria.color);
+                                        }
 
 
-                        world[i][j] = 0;
-                        world[x][y] = 2;
 
-                        /*if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                            if(IsMouseHere((int)x - 5,
-                                           (int)y - 5, 10, 10))
-                                stats = obj_bacteria;
+                                    add_in_reg(&reg, x, y);
 
-                            if(bacterium[i].index == stats.index && stats.index != 0)
-                                stats = bacterium[i];
+                                    temp = world[x][y];
+                                    world[x][y] = world[i][j];
+                                    world[i][j] = temp;
+                                }
 
-                            draw_bacterium_stats((int)stats.x, (int)stats.y, stats.index, 3);*/
+                                /*if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                                    if(IsMouseHere((int)x - 5,
+                                                   (int)y - 5, 10, 10))
+                                        stats = obj_bacteria;
+
+                                    if(bacterium[i].index == stats.index && stats.index != 0)
+                                        stats = bacterium[i];
+
+                                    draw_bacterium_stats((int)stats.x, (int)stats.y, stats.index, 3);*/
+                            }
                     }
+
+            free(reg);
+            reg = NULL;
+
+            print_obj(objects);
 
             DrawFPS(10, 10);
         EndDrawing();
@@ -207,6 +287,7 @@ int main()
     free(world);
 
     free(objects);
+    //free(obj);
     //-----------------------------------------------
 
     return 0;
@@ -309,19 +390,26 @@ int random(int n)
     }
 }
 
-void add_object(Type **objects, int index, char type)
+void add_object(Type **objects, int *index, char type)
 {
     Type *current;
           current = malloc(sizeof(Type));
 
-    current->index = index;
+    current->index = *index;
     if(type == food)
-        current->inanimate = (micro_type) {.type = food,
-                                           .color = food_color};
+    {
+        current->type = food;
+        current->inanimate = (micro_type) {.color = food_color};
+    }
     else if(type == bacteria)
-        current->bacterium = (type_bacteria) {.speed = 1,
+    {
+        current->type = bacteria;
+        current->bacterium = (type_bacteria) {.health = random(100),
+                                              .speed = 1,
                                               .multiply_rate = 0.1,
-                                              .color = bacteria_color};
+                                              .color = bacteria_color,
+                                              .DNA = gen_DNA(2, 2)};
+    }
 
     if(*objects == NULL)
         current->next = NULL;
@@ -331,56 +419,118 @@ void add_object(Type **objects, int index, char type)
     *objects = current;
 }
 
-void generate_type(int ***world, Type **objects, int n, char type)
+void generate_type(int ***world, Type **objects, int *index, int n, char type)
 {
     int x, y;
-    int index;
     Color type_color;
     int **new_world;
           new_world = *world;
 
-    if(type == food)
-        index = 1;
-    else if(type == bacteria)
-        index = 2;
-
-    for(int i = 0; i < n; i++)
+    for(int i = 1; i <= n; i++)
     {
+        add_object(objects, index, type);
+
         x = random(ScreenWidth - border);
         y = random(ScreenHeight - border);
 
-        new_world[x][y] = index;
+        new_world[x][y] = *index;
+
+        (*index)++;
     }
 
     *world = new_world;
 }
 
-void extract_by_index(void **obj, Type *objects, int index)
+Type extract_by_index(Type **objects, int index)
 {
+    Type *current = *objects;
+    Type indexed_object;
+         indexed_object.type = space;
+
     if(objects == NULL)
         return;
 
-    void *temp_obj;
+    while(current != NULL && current->index != index)
+        current = current->next;
 
-    while(objects->index != index)
-        objects = objects->next;
+    // Decrementation health
+    if(current->type == bacteria)
+        current->bacterium.health--;
 
-    if(index == 1)
-        temp_obj = &objects->inanimate;
-    else if(index == 2)
-        temp_obj = &objects->bacterium;
+    if(current == NULL)
+        return indexed_object;
 
-    *obj = temp_obj;
+    indexed_object = *current;
+
+    // Destroy object
+    if(current->bacterium.health == 0)
+    {
+
+        printf("\nindex = %d\n", current->index);
+        destr_object(objects, index);
+
+        print_obj(*objects);
+    }
+
+    return indexed_object;
 }
+
+void destr_object(Type **objects, int index)
+{
+    Type *current = *objects,
+         *prev;
+
+    while(current != NULL && current->index != index)
+    {
+        prev = current;
+        current = current->next;
+    }
+
+    prev->next = current->next;
+    *objects = prev;
+
+    free(current);
+}
+
+// Register
+//-------------------------------------------------
+void add_in_reg(Coord_Reg **reg, int x, int y)
+{
+    Coord_Reg *tmp_reg = malloc(sizeof(Coord_Reg));
+    tmp_reg->x = x, tmp_reg->y = y;
+
+    if(reg == NULL)
+    {
+        *reg = tmp_reg;
+        return;
+    }
+
+    tmp_reg->next = *reg;
+    *reg = tmp_reg;
+}
+
+bool verify_reg(Coord_Reg *reg, int x, int y)
+{
+    while(reg != NULL)
+    {
+        if(reg->x == x && reg->y == y)
+            return true;
+
+        reg = reg->next;
+    }
+
+    return false;
+}
+//-------------------------------------------------
 
 /*
  * Control the behavior of bacterium
  * Every time it used a new random number
 */
-void bacterium_behavior(int *x, int *y, float size)
+void bacterium_behavior(int *x, int *y, int rand_num, float size)
 {
     // Get a random number
-    int rand_num = random(4);
+    //int rand_num = random(4);
 
     // Get the temporal small control
     //float size = speed;
