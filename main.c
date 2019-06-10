@@ -478,18 +478,27 @@ Type extract_by_index(Type **objects, int index)
 void destr_object(Type **objects, int index)
 {
     Type *current = *objects,
-         *prev;
-
-    while(current != NULL && current->index != index)
+         *prev = NULL;
+    if(index==0)
+    {
+        prev = *objects;
+        *objects=prev->next;
+        free(prev);
+    } else
+    {
+    prev = current;
+    while(current->next != NULL && current->index != index)
     {
         prev = current;
         current = current->next;
     }
-
+    if(current->index==index)
+    {
     prev->next = current->next;
-    *objects = prev;
-
     free(current);
+    } else printf("\nMai Oleg ai un BUG :)  [ index out of range] \n");
+
+    }
 }
 
 // Register
