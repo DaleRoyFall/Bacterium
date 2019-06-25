@@ -8,14 +8,16 @@
 #define bacteria_color BLUE
 #define food_color     LIME
 
+//#include <windows.h>
+
 // Initialize with screen dimensions
-//---------------------------------
-const int ScreenWidth = 600;
+//----------------------------------
 const int ScreenHeight = 800;
-//---------------------------------
+const int ScreenWidth = 600;
+//----------------------------------
 
 // Global variables
-//---------------------------------
+//----------------------------------
 // Wall's border
 int border = 10;
 
@@ -91,21 +93,7 @@ void generate_type(int ***world, Type **objects, int *index, int n, char type);
 
 // Genetics
 //-------------------------------------------------
-DNA gen_DNA(int width, int height)
-{
-    DNA DNA;
-    DNA.ma_width = width,  DNA.ma_height = height;
-    DNA.matrix = malloc(sizeof(int*) * height);
-
-    for(int i = 0; i < height; i++)
-    {
-        DNA.matrix[i] = malloc(sizeof(int) * width);
-        for(int j = 0; j < width; j++)
-            DNA.matrix[i][j] = random(4);
-    }
-
-    return DNA;
-}
+DNA gen_DNA(int width, int height);
 //-------------------------------------------------
 
 // Extract object from list
@@ -114,14 +102,17 @@ Type extract_by_index(Type **objects, int index);
 // Destroy object
 void destr_object(Type **objects, int index);
 
+// Free object's memory
+void free_object(Type *object);
+
 // Register
-//-----------------------------------------------
+//------------------------------------------------------------------
 // Add data in register
 void add_in_reg(Coord_Reg **reg, int x, int y);
 
 // Verify if coordinate are contains in register
 bool verify_reg(Coord_Reg *reg, int x, int y);
-//-----------------------------------------------
+//------------------------------------------------------------------
 
 // Give some behavior to every bacterium
 void bacterium_behavior(int *x, int *y, int rand_num, int speed);
@@ -137,6 +128,10 @@ void draw_bacterium_stats(int x, int y, int index, int size);
 
 // Print list with objects
 void print_obj(Type *objects);
+
+// Verify if coordinates don't exit from world
+// If sign is space then we don't verify this coordinate
+bool is_border(int x, int y, int size, char x_sign, char y_sign);
 
 // Main
 int main()
@@ -188,8 +183,8 @@ int main()
     Type obj;
 
     int n = 0, m = 0;
+    int var = 0;
 
-    //print_obj(objects);
     //Type stats;
     Coord_Reg new_collision = {.x = 0,
                                .y = 0};
@@ -214,10 +209,10 @@ int main()
                     if(world[i][j] != 0)
                     {
                         obj = extract_by_index(&objects, world[i][j]);
-                        //printf("\nExtract -> (%d)\n", world[i][j]);
+
                         if(obj.type == space)
                             world[i][j] = 0;
-                        else//if(obj.type != space)
+                        else if(obj.type != space)
                             if(obj.type == food)
                             {
                                 obj_food = obj.inanimate;
@@ -230,9 +225,8 @@ int main()
                                 if(!verify_reg(reg, x, y))
                                 {
                                     bacterium_behavior(&x, &y, obj_bacteria.DNA.matrix[m][n], obj_bacteria.speed);
-                                    //verify_collision(world, i, j, x, y, 3);
+                                    var = verify_collision(world, i, j, x, y, 4);
                                     DrawRectangle(x, y, 4, 4, obj_bacteria.color);
-                                    //DrawPixel(x, y, obj_bacteria.color);
 
                                     add_in_reg(&reg, x, y);
 
@@ -286,7 +280,6 @@ int main()
     free(world);
 
     free(objects);
-    //free(obj);
     //-----------------------------------------------
 
     return 0;
@@ -403,13 +396,11 @@ void add_object(Type **objects, int *index, char type)
     else if(type == bacteria)
     {
         current->type = bacteria;
-        current->bacterium = (type_bacteria) {.health = random(100),
+        current->bacterium = (type_bacteria) {.health = random(1000),
                                               .speed = 1,
                                               .multiply_rate = 0.1,
                                               .color = bacteria_color,
                                               .DNA = gen_DNA(2, 2)};
-
-        //printf("\n%d\n", current->bacterium.health);
     }
 
     if(*objects == NULL)
@@ -434,12 +425,35 @@ void generate_type(int ***world, Type **objects, int *index, int n, char type)
         x = random(ScreenWidth - border);
         y = random(ScreenHeight - border);
 
+        // If bacterium is create in border space then
+        // Increments it with border
+        if(x < border)
+            x += border;
+        if(y < border)
+            y += border;
+
         new_world[x][y] = *index;
 
         (*index)++;
     }
 
     *world = new_world;
+}
+
+DNA gen_DNA(int width, int height)
+{
+    DNA DNA;
+    DNA.ma_width = width,  DNA.ma_height = height;
+    DNA.matrix = malloc(sizeof(int*) * height);
+
+    for(int i = 0; i < height; i++)
+    {
+        DNA.matrix[i] = malloc(sizeof(int) * width);
+        for(int j = 0; j < width; j++)
+            DNA.matrix[i][j] = random(4);
+    }
+
+    return DNA;
 }
 
 Type extract_by_index(Type **objects, int index)
@@ -477,7 +491,7 @@ void destr_object(Type **objects, int index)
     {
         prev = *objects;
         *objects = prev->next;
-        free(prev);
+        free_object(prev);
     }
     else
     {
@@ -489,26 +503,28 @@ void destr_object(Type **objects, int index)
             current = current->next;
         }
 
-        /*if(current->next == NULL)
+        if(current->next == NULL)
         {
             prev->next = NULL;
-            free(current);
+            free_object(current);
             return;
-        }*/
+        }
 
         if(current->index == index)
         {
             prev->next = current->next;
-            free(current);
+            free_object(current);
         }
     }
 }
 
-void free_DNA(DNA *DNA)
+void free_object(Type *object)
 {
-    for(int i = 0; i < DNA->ma_height; i++)
-        free((*DNA).matrix[i]);
-    free((*DNA).matrix);
+    DNA DNA = object->bacterium.DNA;
+    for(int i = 0; i < DNA.ma_height; i++)
+        free(DNA.matrix[i]);
+    free(DNA.matrix);
+    free(object);
 }
 
 // Register
@@ -542,61 +558,85 @@ bool verify_reg(Coord_Reg *reg, int x, int y)
 }
 //-------------------------------------------------
 
+bool is_border(int x, int y, int size, char x_sign, char y_sign)
+{
+    // Verify x coordinate
+    if(x_sign != space)
+        switch(x_sign)
+        {
+            case '-':
+                if(x - size < border)
+                    return false;
+            case '+':
+                if(x + size > ScreenWidth - border - size)
+                    return false;
+        }
+
+    // Verify y coordinate
+    if(y_sign != space)
+        switch(y_sign)
+        {
+            case '-':
+                if(y - size < border)
+                    return false;
+            case '+':
+                if(y + size > ScreenHeight - border - size)
+                    return false;
+        }
+
+    return true;
+}
+
 /*
  * Control the behavior of bacterium
  * Every time it used a new random number
 */
 void bacterium_behavior(int *x, int *y, int rand_num, int size)
 {
-    // Get a random number
-    //int rand_num = random(4);
-    //printf("\n%d\n", rand_num);
-
     // Get the temporal small control
-    //float size = speed;
     switch(rand_num)
     {
         // Go to S-E else go S
         case 0:
-            if((*x + size) < ScreenWidth - border && (*y + size) < ScreenHeight - border)
+            if(is_border(*x, *y, size, '+', '+'))
             {
                 *x += size;
                 *y += size;
             }
-            else if((*y + size) < ScreenHeight - border)
+            else if(is_border(*x, *y, size, space, '+'))
                 *y += size;
             break;
 
         // Go to N-E else go E
         case 1:
-            if((*x + size) < ScreenWidth - border && (*y - size) > border)
+            if(is_border(*x, *y, size, '+', '-'))
             {
                 *x += size;
                 *y -= size;
             }
-            else if((*x + size) < ScreenWidth - border)
+            else if(is_border(*x, *y, size, '+', space))
                 *x += size;
             break;
 
         // Go to S-V else go V
         case 2:
-            if((*x - size) > border && (*y + size) < ScreenHeight - border)
+            if(is_border(*x, *y, size, '-', '+'))
             {
                 *x -= size;
                 *y += size;
             }
-            else if((*x - size) > border)
+            else if(is_border(*x, *y, size, '-', space))
                 *x -= size;
             break;
 
         // Go to S-E else go N
         case 3:
-            if((*x - size) > border && (*y - size) > border)
+            if(is_border(*x, *y, size, '-', '-'))
             {
                 *x -= size;
                 *y -= size;
             }
-            else if((*y - size) > border)
+            else if(is_border(*x, *y, size, space, '-'))
                 *y -= size;
             break;
     }
@@ -604,10 +644,10 @@ void bacterium_behavior(int *x, int *y, int rand_num, int size)
 
 int verify_collision(int **world, int i, int j, int x, int y, int size)
 {
+    // Coordinate differentiation responds for the directions
     int diff_x = x - i;
     int diff_y = y - j;
     int temp_i, temp_j;
-
 
     if(diff_x == 0 && diff_y == 0)
         return 0;
@@ -617,7 +657,7 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
     // Verify left/right border plus extra (size-1) pixels Up and down
     if(diff_y == 0)
     {
-        // Go to superior extreme (i - size)
+        // Go to superior extreme (j - size)
         j -= (size - 1);
 
         // Go to right/left extreme
@@ -629,8 +669,8 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
         for(int m = 0; m < size*2 - 1; m++)
             if(world[i][j + m] != 0)
             {
-                DrawRectangle(i + m - 2, j - 2, 10, 10, RED);
-                return world[i + m][j];
+                DrawRectangle(i - 2, j + m - 2, 5, 5, RED);
+                return world[i][j + m];
             }
     }
     // When bacteria go to North/South
@@ -638,18 +678,20 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
     // Verify down/up border plus extra (size-1) pixels right and left
     else if(diff_x == 0)
     {
+        // Go to left extreme (i - size)
         i -= (size - 1);
 
-        if(diff_y < 0)
-            j -= size;
-        else if(diff_y > 0)
+        // Go to right/left extreme
+        if(diff_y > 0)
             j += size;
+        else if(diff_y < 0)
+            j -= size;
 
         for(int m = 0; m < size*2 - 1; m++)
             if(world[i + m][j] != 0)
             {
-                DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                return world[i][j + m];
+                DrawRectangle(i + m - 2, j - 2, 5, 5, RED);
+                return world[i + m][j];
             }
     }
 
@@ -703,9 +745,11 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
             else if(world[i + m][j] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                return world[i][j+m];
+                return world[i + m][j];
             }
     }
+
+    return 0;
 
 }
 
