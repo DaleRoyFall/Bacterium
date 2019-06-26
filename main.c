@@ -3,12 +3,11 @@
 #include <assert.h>
 #include <raylib.h>
 #define bacteria 'b'
+#define child    'c'
 #define food     'f'
 #define space    's'
 #define bacteria_color BLUE
 #define food_color     LIME
-
-//#include <windows.h>
 
 // Initialize with screen dimensions
 //----------------------------------
@@ -22,7 +21,7 @@ const int ScreenWidth = 600;
 int border = 10;
 
 // Number of start bacteria
-int bacteria_counter = 1000;
+int bacteria_counter = 100;
 
 // Pause button
 bool pause = true;
@@ -50,8 +49,9 @@ typedef struct
 typedef struct
 {
     int   health;
-    int speed;
-    float multiply_rate;
+    int   speed;
+    //float multiply_rate;
+    int   size;
     Color color;
     DNA   DNA;
 }type_bacteria;
@@ -114,24 +114,28 @@ void add_in_reg(Coord_Reg **reg, int x, int y);
 bool verify_reg(Coord_Reg *reg, int x, int y);
 //------------------------------------------------------------------
 
+// Verify if coordinates don't exit from world
+// If sign is space then we don't verify this coordinate
+bool is_border(int x, int y, int size, char x_sign, char y_sign);
+
 // Give some behavior to every bacterium
 void bacterium_behavior(int *x, int *y, int rand_num, int speed);
 
+// Determine what action form DNA's matrix need to be used
+void DNA_action_coord(int *action_coord, int *m, int *n);
+
 // Verify collision between two bacteria
-int verify_collision(int **world, int i, int j, int x, int y, int size);
+int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size);
 
 // If bacterium meet another one then multiply
-void multiply(Type **objects ,int thrs_index, int scnd_index);
+void multiply(int ***world, Type **objects, int *index, int thrs_index, Coord_Reg thrs_coord,
+                                                        int scnd_index, Coord_Reg scnd_coord);
 
 // Draw statistic of selected bacteria
 void draw_bacterium_stats(int x, int y, int index, int size);
 
 // Print list with objects
 void print_obj(Type *objects);
-
-// Verify if coordinates don't exit from world
-// If sign is space then we don't verify this coordinate
-bool is_border(int x, int y, int size, char x_sign, char y_sign);
 
 // Main
 int main()
@@ -182,12 +186,16 @@ int main()
     int   temp;
     Type obj;
 
-    int n = 0, m = 0;
-    int var = 0;
+    int action_coord = 0,
+        n = 0, m = 0;
+    int scnd_index = 0;
 
-    //Type stats;
-    Coord_Reg new_collision = {.x = 0,
-                               .y = 0};
+    // Objects with stats
+    Type stats;
+
+    // Thirst and second parent's coordinate
+    Coord_Reg thrs_coord,
+              scnd_coord;
 
     // Food's object
     micro_type obj_food;
@@ -212,21 +220,31 @@ int main()
 
                         if(obj.type == space)
                             world[i][j] = 0;
-                        else if(obj.type != space)
-                            if(obj.type == food)
+                        else if(obj.type == food)
                             {
                                 obj_food = obj.inanimate;
                                 DrawCircle(i, j, 2, obj_food.color);
                             }
-                            else if(obj.type == bacteria)
+                            else if(obj.type == bacteria || obj.type == child)
                             {
                                 obj_bacteria = obj.bacterium;
                                 x = i, y = j;
                                 if(!verify_reg(reg, x, y))
                                 {
                                     bacterium_behavior(&x, &y, obj_bacteria.DNA.matrix[m][n], obj_bacteria.speed);
-                                    var = verify_collision(world, i, j, x, y, 4);
-                                    DrawRectangle(x, y, 4, 4, obj_bacteria.color);
+
+                                    // Collision and multiply
+                                    //-------------------------------------------------
+                                    thrs_coord = (Coord_Reg){.x = i,
+                                                             .y = j};
+
+                                    scnd_index = verify_collision(world, &scnd_coord, i, j, x, y, obj_bacteria.size);
+                                    if(scnd_index > 0 && obj.type != child)
+                                        multiply(&world, &objects, &index, world[i][j], thrs_coord,
+                                                                           scnd_index, scnd_coord);
+                                    //-------------------------------------------------
+
+                                    DrawRectangle(x, y, obj_bacteria.size, obj_bacteria.size, obj_bacteria.color);
 
                                     add_in_reg(&reg, x, y);
 
@@ -236,31 +254,20 @@ int main()
                                 }
 
                                 /*if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
-                                    if(IsMouseHere((int)x - 5,
-                                                   (int)y - 5, 10, 10))
-                                        stats = obj_bacteria;
+                                    if(IsMouseHere(x - 4, y - 4, 10, 10))
+                                    {
+                                        stats.index = world[x][y];
+                                        stats.bacterium = obj_bacteria;
+                                    }
 
-                                    if(world[i][j] == stats.index && stats.index != 0)
-                                        stats = world[i][j];
-
-                                    draw_bacterium_stats((int)stats.x, (int)stats.y, stats.index, 3);*/
+                                if(world[i][j] == stats.index && stats.index != 0)
+                                    draw_bacterium_stats(i, j, stats.index, 3);*/
                             }
                     }
 
-            free(reg);
-            reg = NULL;
+            free_reg(&reg);
 
-            if(m == 0 && n == 0 || m == 0 && n == 1)
-                m = 1;
-            else if(m == 1 && n == 0)
-                n = 1;
-            else if(m == 1 && n == 1)
-            {
-                m = 0;
-                n = 0;
-            }
-
-            //print_obj(objects);
+            DNA_action_coord(&action_coord, &m, &n);
 
             DrawFPS(10, 10);
         EndDrawing();
@@ -279,7 +286,14 @@ int main()
         free(world[i]);
     free(world);
 
-    free(objects);
+    Type *current = objects;
+    Type *cursor;
+    while(current != NULL)
+    {
+        cursor = current->next;
+        free_object(objects);
+        current = cursor;
+    }
     //-----------------------------------------------
 
     return 0;
@@ -384,8 +398,7 @@ int random(int n)
 
 void add_object(Type **objects, int *index, char type)
 {
-    Type *current;
-          current = malloc(sizeof(Type));
+    Type *current = malloc(sizeof(Type));
 
     current->index = *index;
     if(type == food)
@@ -398,7 +411,7 @@ void add_object(Type **objects, int *index, char type)
         current->type = bacteria;
         current->bacterium = (type_bacteria) {.health = random(1000),
                                               .speed = 1,
-                                              .multiply_rate = 0.1,
+                                              .size = 4,
                                               .color = bacteria_color,
                                               .DNA = gen_DNA(2, 2)};
     }
@@ -414,9 +427,7 @@ void add_object(Type **objects, int *index, char type)
 void generate_type(int ***world, Type **objects, int *index, int n, char type)
 {
     int x, y;
-    Color type_color;
-    int **new_world;
-          new_world = *world;
+    int **new_world = *world;
 
     for(int i = 1; i <= n; i++)
     {
@@ -446,14 +457,42 @@ DNA gen_DNA(int width, int height)
     DNA.ma_width = width,  DNA.ma_height = height;
     DNA.matrix = malloc(sizeof(int*) * height);
 
-    for(int i = 0; i < height; i++)
+    for(int i = 0; i < width; i++)
     {
         DNA.matrix[i] = malloc(sizeof(int) * width);
-        for(int j = 0; j < width; j++)
+        for(int j = 0; j < height; j++)
             DNA.matrix[i][j] = random(4);
     }
 
     return DNA;
+}
+
+void add_child(int ***world, Type **objects, int *index, Coord_Reg coord, DNA child_DNA)
+{
+    int **new_world = *world;
+
+    // Add in list
+    //-------------------------------------------------------
+    Type *current = malloc(sizeof(Type));
+    current->index = *index;
+    current->type = child;
+    current->bacterium = (type_bacteria) {.health = 1000,
+                                          .speed = 1,
+                                          .size = 2,
+                                          .color = LIME,
+                                          .DNA = child_DNA};
+    if(*objects == NULL)
+        current->next = NULL;
+    else
+        current->next = *objects;
+
+    *objects = current;
+    //-------------------------------------------------------
+
+    new_world[coord.x][coord.y] = *index;
+    *world = new_world;
+
+    (*index)++;
 }
 
 Type extract_by_index(Type **objects, int index)
@@ -469,15 +508,15 @@ Type extract_by_index(Type **objects, int index)
     if(current == NULL)
         return indexed_object;
 
+    // Destroy object
+    //if(current->bacterium.health <= 0)
+      //  destr_object(objects, index);
+
     // Decrementation health
     if(current->type == bacteria)
         current->bacterium.health--;
 
     indexed_object = *current;
-
-    // Destroy object
-    if(current->bacterium.health == 0)
-        destr_object(objects, index);
 
     return indexed_object;
 }
@@ -487,7 +526,7 @@ void destr_object(Type **objects, int index)
     Type *current = *objects,
          *prev = NULL;
 
-    if(index == 0)
+    if((*objects)->index == index)
     {
         prev = *objects;
         *objects = prev->next;
@@ -555,6 +594,24 @@ bool verify_reg(Coord_Reg *reg, int x, int y)
     }
 
     return false;
+}
+
+void free_reg(Coord_Reg **reg)
+{
+    Coord_Reg *cursor, *current;
+
+    if(*reg == NULL)
+        return;
+
+    cursor = *reg;
+    while(cursor != NULL)
+    {
+        current = cursor->next;
+        free(cursor);
+        cursor = current;
+    }
+
+    *reg = NULL;
 }
 //-------------------------------------------------
 
@@ -642,7 +699,16 @@ void bacterium_behavior(int *x, int *y, int rand_num, int size)
     }
 }
 
-int verify_collision(int **world, int i, int j, int x, int y, int size)
+void DNA_action_coord(int *action_coord, int *m, int *n)
+{
+    // Converting action coordinate in double variable's binary
+    *n = (*action_coord) % 2;
+    *m = (*action_coord) / 2 % 2;
+
+    (*action_coord)++;
+}
+
+int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size)
 {
     // Coordinate differentiation responds for the directions
     int diff_x = x - i;
@@ -670,6 +736,8 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
             if(world[i][j + m] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 5, 5, RED);
+                *scnd_coord = (Coord_Reg){.x = i,
+                                          .y = j + m};
                 return world[i][j + m];
             }
     }
@@ -691,6 +759,8 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
             if(world[i + m][j] != 0)
             {
                 DrawRectangle(i + m - 2, j - 2, 5, 5, RED);
+                *scnd_coord = (Coord_Reg){.x = i + m,
+                                          .y = j};
                 return world[i + m][j];
             }
     }
@@ -713,12 +783,16 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
             if(world[i][j + m] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
+                *scnd_coord = (Coord_Reg){.x = i,
+                                          .y = j + m};
                 return world[i][j + m];
             }
             else if(world[i + m][j] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                return world[i][j + m];
+                *scnd_coord = (Coord_Reg){.x = i + m,
+                                          .y = j};
+                return world[i + m][j];
             }
     }
 
@@ -740,11 +814,15 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
             if(world[i][j + m] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
+                *scnd_coord = (Coord_Reg){.x = i,
+                                          .y = j + m};
                 return world[i][j + m];
             }
             else if(world[i + m][j] != 0)
             {
                 DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
+                *scnd_coord = (Coord_Reg){.x = i + m,
+                                          .y = j};
                 return world[i + m][j];
             }
     }
@@ -753,9 +831,11 @@ int verify_collision(int **world, int i, int j, int x, int y, int size)
 
 }
 
-void multiply(Type **objects ,int thrs_index, int scnd_index)
+void multiply(int ***world, Type **objects, int *index, int thrs_index, Coord_Reg thrs_coord,
+                                                        int scnd_index, Coord_Reg scnd_coord)
 {
     Type temp_obj;
+
     // Thirst parent, second parent
     type_bacteria thrs_parent, scnd_parent;
 
@@ -768,7 +848,8 @@ void multiply(Type **objects ,int thrs_index, int scnd_index)
     scnd_parent = temp_obj.bacterium;
 
     // Thirst DNA, Second DNA
-    DNA thrs_DNA, scnd_DNA;
+    DNA thrs_DNA = thrs_parent.DNA,
+        scnd_DNA = scnd_parent.DNA;
 
     // If parents have the the same size of DNA
     if(thrs_DNA.ma_width == scnd_DNA.ma_width &&
@@ -776,58 +857,123 @@ void multiply(Type **objects ,int thrs_index, int scnd_index)
     {
         // If parents have the same sizes of DNA
         // then copy it in new variables
+        int size = thrs_parent.size;
+
         int ma_width = thrs_DNA.ma_width;
         int ma_height = thrs_DNA.ma_height;
 
         // Copy parent's DNA structure in new matrix
-        int **thrs_matrix = NULL;
-              thrs_matrix = thrs_DNA.matrix;
+        int **thrs_matrix = thrs_DNA.matrix;
+        int **scnd_matrix = scnd_DNA.matrix;
 
-        int **scnd_matrix = NULL;
-              scnd_matrix = scnd_DNA.matrix;
-
-        /*for(int i = 0; i < ma_height; i++)
+        /*printf("\nThirst parent\n");
+        for(int i = 0; i < ma_height; i++)
         {
             printf("\n");
             for(int j = 0; j < ma_width; j++)
                 printf("%d ", thrs_matrix[i][j]);
+        }
 
+        printf("\n");
+
+        printf("\nSecond parent\n");
+        for(int i = 0; i < ma_height; i++)
+        {
+            printf("\n");
+            for(int j = 0; j < ma_width; j++)
+                printf("%d ", scnd_matrix[i][j]);
         }*/
 
-        // Child's DNA
-        DNA thrs_child, scnd_child,
-            thrd_child, frth_child;
+        //int matrix[ma_width][ma_height];
 
-        int matrix[ma_height][ma_width];
+        // Generate children's DNA
+        DNA thrs_child = gen_DNA(ma_width, ma_height),
+            scnd_child = gen_DNA(ma_width, ma_height),
+            thrd_child = gen_DNA(ma_width, ma_height),
+            frth_child = gen_DNA(ma_width, ma_height);
 
         // Create children's DNA structure
-        for(int i = 0; i < ma_height; i++)
-            for(int j = 0; j < ma_width; j++)
+        for(int i = 0; i < ma_width; i++)
+            for(int j = 0; j < ma_height; j++)
             {
                 // Thirst child
                 thrs_child.matrix[i][j] = thrs_matrix[i][j];
-                thrs_child.matrix[ma_height - i][j] = scnd_matrix[ma_height - i][j];
+                thrs_child.matrix[ma_height - i - 1][j] = scnd_matrix[ma_height - i - 1][j];
 
                 // Second child
                 scnd_child.matrix[i][j] = scnd_matrix[i][j];
-                scnd_child.matrix[ma_height - i][j] = thrs_matrix[ma_height - i][j];
+                scnd_child.matrix[ma_height - i - 1][j] = thrs_matrix[ma_height - i - 1][j];
 
                 // Third child
                 thrd_child.matrix[j][i] = thrs_matrix[j][i];
-                thrd_child.matrix[ma_height - j][i] = scnd_matrix[ma_height - j][i];
+                thrd_child.matrix[j][ma_width - i - 1] = scnd_matrix[j][ma_width - i - 1];
 
                 // Forth child
                 frth_child.matrix[j][i] = scnd_matrix[j][i];
-                frth_child.matrix[ma_height - j][i] = thrs_matrix[ma_height - j][i];
+                frth_child.matrix[j][ma_width - i - 1] = thrs_matrix[j][ma_width - i - 1];
             }
+
+            // Children's DNA width
+            thrs_child.ma_width = scnd_child.ma_width =
+            thrd_child.ma_width = frth_child.ma_width = ma_width;
 
             // Children's DNA height
             thrs_child.ma_height = scnd_child.ma_height =
-            thrs_child.ma_height = frth_child.ma_height = ma_height;
+            thrd_child.ma_height = frth_child.ma_height = ma_height;
 
-            // Children's DNA weight
-            thrs_child.ma_width = scnd_child.ma_width =
-            thrs_child.ma_width = frth_child.ma_width = ma_width;
+            /*printf("\nThirst child\n");
+            for(int i = 0; i < ma_height; i++)
+            {
+                printf("\n");
+                for(int j = 0; j < ma_width; j++)
+                    printf("%d ", thrs_child.matrix[i][j]);
+            }
+
+            printf("\nSecond child\n");
+            for(int i = 0; i < ma_height; i++)
+            {
+                printf("\n");
+                for(int j = 0; j < ma_width; j++)
+                    printf("%d ", scnd_child.matrix[i][j]);
+            }
+
+            printf("\nThird child\n");
+            for(int i = 0; i < ma_height; i++)
+            {
+                printf("\n");
+                for(int j = 0; j < ma_width; j++)
+                    printf("%d ", thrd_child.matrix[i][j]);
+            }
+
+            printf("\nForth child\n");
+            for(int i = 0; i < ma_height; i++)
+            {
+                printf("\n");
+                for(int j = 0; j < ma_width; j++)
+                    printf("%d ", frth_child.matrix[i][j]);
+            }*/
+
+            /** Remember to destroy parents **/
+            destr_object(objects, thrs_index);
+            destr_object(objects, scnd_index);
+
+            int temp_x = thrs_coord.x + size + 2;
+            int temp_y = thrs_coord.y;
+
+            printf("Here = (%d, %d)|(%d, %d)", thrs_coord.x, thrs_coord.y, temp_x, temp_y);
+            // Determinate coordinates for third and forth children
+            Coord_Reg thrd_coord = (Coord_Reg){.x = thrs_coord.x + size/ 2,
+                                               .y = thrs_coord.y + size / 2,},
+                      frth_coord = (Coord_Reg){.x = scnd_coord.x + size / 2 ,
+                                               .y = scnd_coord.y + size / 2,};
+
+            // Add children in object's list
+            add_child(world, objects, index, thrs_coord, thrs_child);
+            add_child(world, objects, index, scnd_coord, scnd_child);
+            add_child(world, objects, index, thrd_coord, thrd_child);
+            add_child(world, objects, index, frth_coord, frth_child);
+
+            printf("\nChildren are created!\n");
 
     }
     else
