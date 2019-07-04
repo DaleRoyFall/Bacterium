@@ -19,9 +19,11 @@ const int ScreenWidth = 600;
 //----------------------------------
 // Wall's border
 int border = 10;
+int food_energy = 100;
 
-// Number of start bacteria
-int bacteria_counter = 1000;
+// Number of start bacteria and food
+int food_counter = 1000;
+int bacteria_counter = 100;
 
 // Pause button
 bool pause = true;
@@ -41,6 +43,8 @@ typedef struct
 // Simple DNA structure
 typedef struct
 {
+    char last_transform;
+    int position;
     int ma_width;
     int ma_height;
     int **matrix;
@@ -50,7 +54,6 @@ typedef struct
 {
     int   health;
     int   speed;
-    //float multiply_rate;
     int   size;
     Color color;
     DNA   DNA;
@@ -78,6 +81,12 @@ typedef struct
     int y;
     struct Coord_Reg *next;
 }Coord_Reg;
+
+
+// Temp buff
+//--------------
+Type *buff_obj;
+//--------------
 
 // Main menu
 void menu();
@@ -116,13 +125,19 @@ bool verify_reg(Coord_Reg *reg, int x, int y);
 
 // Verify if coordinates don't exit from world
 // If sign is space then we don't verify this coordinate
-bool is_border(int x, int y, int size, char x_sign, char y_sign);
+bool is_border(int x, int y, int size, int speed, char x_sign, char y_sign);
 
 // Give some behavior to every bacterium
-void bacterium_behavior(int *x, int *y, int rand_num, int speed);
+int bacterium_moving(int *x, int *y, int rand_num, int size, int speed);
 
 // Determine what action form DNA's matrix need to be used
-void DNA_action_coord(int *action_coord, int *m, int *n);
+void DNA_action_coord(DNA curr_DNA, int *m, int *n);
+
+// Determine in what border bacterium stuck
+char what_border(int x, int y, int size);
+
+// Transform DNA when bacterium meet wall
+void transform_DNA(DNA temp_DNA, char name_border);
 
 // Verify collision between two bacteria
 int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size);
@@ -132,7 +147,7 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_parent, Coord_
                                                         Type scnd_parent, Coord_Reg scnd_coord);
 
 // Draw statistic of selected bacteria
-void draw_bacterium_stats(int x, int y, int index, int size);
+void draw_bacterium_stats(int x, int y, int index, int health, int size);
 
 // Print list with objects
 void print_obj(Type *objects);
@@ -163,17 +178,13 @@ int main()
     // Objects Indexes
     int index = 1;
 
-    // Statistics used for draw_bacterium_stats
-    /*type_bacteria stats;
-                    stats.index = 0;*/
-
     // Initialize Window
     InitWindow(ScreenWidth, ScreenHeight, "Pandora");
     SetTargetFPS(30);
 
     // Generate bacteria and food
     //----------------------------------------------------------
-    generate_type(&world, &objects, &index, 10, food);
+    generate_type(&world, &objects, &index, food_counter, food);
     generate_type(&world, &objects, &index, bacteria_counter, bacteria);
     //----------------------------------------------------------
 
@@ -189,12 +200,14 @@ int main()
     Type obj,
          scnd_obj;
 
-    int action_coord = 0,
-        n = 0, m = 0;
+    int n = 0, m = 0;
     int scnd_index = 0;
 
-    // Objects with stats
+    int move;
+
+    // Statistics used for draw_bacterium_stats
     Type stats;
+         stats.index = 0;
 
     // Thirst and second parent's coordinate
     Coord_Reg thrs_coord,
@@ -226,7 +239,7 @@ int main()
                         else if(obj.type == food)
                             {
                                 obj_food = obj.inanimate;
-                                DrawCircle(i, j, 2, obj_food.color);
+                                DrawRectangle(i, j, 1, 1, obj_food.color);
                             }
                             else if(obj.type == bacteria || obj.type == child)
                             {
@@ -234,22 +247,70 @@ int main()
                                 x = i, y = j;
                                 if(!verify_reg(reg, x, y))
                                 {
-                                    bacterium_behavior(&x, &y, obj_bacteria.DNA.matrix[m][n], obj_bacteria.speed);
+                                    DNA_action_coord(obj_bacteria.DNA, &m, &n);
+                                    move = bacterium_moving(&x, &y, obj_bacteria.DNA.matrix[m][n], obj_bacteria.size,
+                                                                                                   obj_bacteria.speed);
+
+
+
+                                    if(move == -1 && obj_bacteria.DNA.last_transform != what_border(x, y, obj_bacteria.size))
+                                        transform_DNA(obj_bacteria.DNA, what_border(x, y, obj_bacteria.size));
 
                                     // Collision and multiply
                                     //-------------------------------------------------
-                                    thrs_coord = (Coord_Reg){.x = i,
-                                                             .y = j};
 
                                     // Extract the secondary index with which the first object interacts
                                     scnd_index = verify_collision(world, &scnd_coord, i, j, x, y, obj_bacteria.size);
-                                    scnd_obj = extract_by_index(&objects, scnd_index);
 
-                                    if(obj.type == bacteria && scnd_obj.type == bacteria)
-                                        multiply(&world, &objects, &index, obj,      thrs_coord,
-                                                                           scnd_obj, scnd_coord);
 
-                                    //-------------------------------------------------
+                                    // Work with last member
+                                    //-----------------------------------------------------------
+                                    if(bacteria_counter == 1)
+                                    {
+                                        for(int s = 0; s < obj_bacteria.DNA.ma_width; s++)
+                                        {
+                                            printf("\n");
+                                            for(int t = 0; t < obj_bacteria.DNA.ma_height; t++)
+                                                printf("%d ", obj_bacteria.DNA.matrix[s][t]);
+                                        }
+                                        printf("\nIndex = (%d)", world[i][j]);
+                                        abort();
+                                    }
+
+                                    //-----------------------------------------------------------
+
+                                    if(scnd_index >= 0)
+                                    {
+                                        // Coordinate of thirst object
+                                        thrs_coord = (Coord_Reg){.x = i,
+                                                                 .y = j};
+
+                                        // Extract second object
+                                        scnd_obj = extract_by_index(&objects, scnd_index);
+
+                                        // If bacteria meets food then increase his health
+                                        if(scnd_obj.type == food)
+                                        {
+                                            increase_health(&objects, world[i][j]);
+                                            destr_object(&objects, scnd_index);
+                                            food_counter--;
+                                        }
+
+                                        // If second object is bacteria then multiply
+                                        if(obj.type == bacteria && scnd_obj.type == bacteria)
+                                            multiply(&world, &objects, &index, obj,      thrs_coord,
+                                                                               scnd_obj, scnd_coord);
+
+                                        //-------------------------------------------------
+
+                                        // If bacterium health <= 0 then destroy object
+                                        if(obj_bacteria.health <= 0)
+                                        {
+                                            destr_object(&objects, world[i][j]);
+                                            bacteria_counter--;
+                                        }
+
+                                    }
 
                                     DrawRectangle(x, y, obj_bacteria.size, obj_bacteria.size, obj_bacteria.color);
 
@@ -260,21 +321,29 @@ int main()
                                     world[i][j] = temp;
                                 }
 
-                                /*if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                                // Draw bacterium statistics
+                                //-----------------------------------------------------------------
+                                if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
                                     if(IsMouseHere(x - 4, y - 4, 10, 10))
                                     {
                                         stats.index = world[x][y];
                                         stats.bacterium = obj_bacteria;
                                     }
 
-                                if(world[i][j] == stats.index && stats.index != 0)
-                                    draw_bacterium_stats(i, j, stats.index, 3);*/
+                                if(world[x][y] == stats.index && stats.index != 0)
+                                    draw_bacterium_stats(x, y, stats.index, obj_bacteria.health, 3);
+                                //-----------------------------------------------------------------
                             }
                     }
 
-            free_reg(&reg);
+            // Every time generate food
+            if(food_counter < 1500)
+            {
+                generate_type(&world, &objects, &index, 1, food);
+                food_counter++;
+            }
 
-            DNA_action_coord(&action_coord, &m, &n);
+            free_reg(&reg);
 
             DrawFPS(10, 10);
         EndDrawing();
@@ -416,11 +485,11 @@ void add_object(Type **objects, int *index, char type)
     else if(type == bacteria)
     {
         current->type = bacteria;
-        current->bacterium = (type_bacteria) {.health = random(1000),
+        current->bacterium = (type_bacteria) {.health = 1000,
                                               .speed = 1,
                                               .size = 4,
                                               .color = bacteria_color,
-                                              .DNA = gen_DNA(2, 2)};
+                                              .DNA = gen_DNA(8, 8)};
     }
 
     if(*objects == NULL)
@@ -438,10 +507,14 @@ void generate_type(int ***world, Type **objects, int *index, int n, char type)
 
     for(int i = 1; i <= n; i++)
     {
-        add_object(objects, index, type);
+        do
+        {
+            x = random(ScreenWidth - border);
+            y = random(ScreenHeight - border);
+        }
+        while(new_world[x][y] != 0);
 
-        x = random(ScreenWidth - border);
-        y = random(ScreenHeight - border);
+        add_object(objects, index, type);
 
         // If bacterium is create in border space then
         // Increments it with border
@@ -461,6 +534,7 @@ void generate_type(int ***world, Type **objects, int *index, int n, char type)
 DNA gen_DNA(int width, int height)
 {
     DNA DNA;
+    DNA.position = -1;
     DNA.ma_width = width,  DNA.ma_height = height;
     DNA.matrix = malloc(sizeof(int*) * height);
 
@@ -468,7 +542,7 @@ DNA gen_DNA(int width, int height)
     {
         DNA.matrix[i] = malloc(sizeof(int) * width);
         for(int j = 0; j < height; j++)
-            DNA.matrix[i][j] = random(4);
+            DNA.matrix[i][j] = random(8);
     }
 
     return DNA;
@@ -483,7 +557,7 @@ void add_child(int ***world, Type **objects, int *index, Coord_Reg coord, DNA ch
     Type *current = malloc(sizeof(Type));
     current->index = *index;
     current->type = child;
-    current->bacterium = (type_bacteria) {.health = 1000,
+    current->bacterium = (type_bacteria) {.health = 300,
                                           .speed = 1,
                                           .size = 2,
                                           .color = SKYBLUE,
@@ -511,21 +585,46 @@ Type extract_by_index(Type **objects, int index)
     while(current != NULL && current->index != index)
         current = current->next;
 
-    // If current is NULL then return space
+    // If current is NULL then return type = space
     if(current == NULL)
         return indexed_object;
 
-    // Destroy object
-    //if(current->bacterium.health <= 0)
-      //  destr_object(objects, index);
+    // Some special actions
+    if(current->type == bacteria || current->type == child)
+    {
+        // Move position
+        current->bacterium.DNA.position++;
+        if(current->bacterium.DNA.position == current->bacterium.DNA.ma_height *
+                                              current->bacterium.DNA.ma_width)
+            current->bacterium.DNA.position = 0;
 
-    // Decrementation health
-    if(current->type == bacteria)
+        // Decrementation health
         current->bacterium.health--;
+    }
 
     indexed_object = *current;
+    buff_obj = current;
 
     return indexed_object;
+}
+
+void increase_health(Type **objects, int index)
+{
+    Type *current = *objects;
+
+    while(current != NULL && current->index != index)
+        current = current->next;
+
+    if(current != NULL && current->index == index)
+        current->bacterium.health += food_energy;
+
+    // If child increase his health to 400 then
+    if(current->type == child && current->bacterium.health >= 400)
+    {
+        current->type = bacteria;
+        current->color = BLACK;
+        current->bacterium.size = 4;
+    }
 }
 
 void destr_object(Type **objects, int index)
@@ -549,7 +648,7 @@ void destr_object(Type **objects, int index)
             current = current->next;
         }
 
-        if(current->next == NULL)
+        if(current->next == NULL && current->index == index)
         {
             prev->next = NULL;
             free_object(current);
@@ -566,10 +665,14 @@ void destr_object(Type **objects, int index)
 
 void free_object(Type *object)
 {
-    DNA DNA = object->bacterium.DNA;
-    for(int i = 0; i < DNA.ma_height; i++)
-        free(DNA.matrix[i]);
-    free(DNA.matrix);
+    if(object->type == bacteria)
+    {
+        DNA DNA = object->bacterium.DNA;
+        for(int i = 0; i < DNA.ma_height; i++)
+            free(DNA.matrix[i]);
+        free(DNA.matrix);
+    }
+
     free(object);
 }
 
@@ -622,18 +725,20 @@ void free_reg(Coord_Reg **reg)
 }
 //-------------------------------------------------
 
-bool is_border(int x, int y, int size, char x_sign, char y_sign)
+bool is_border(int x, int y, int size, int speed, char x_sign, char y_sign)
 {
     // Verify x coordinate
     if(x_sign != space)
         switch(x_sign)
         {
             case '-':
-                if(x - size < border)
+                if(x - speed < border)
                     return false;
+                break;
             case '+':
-                if(x + size > ScreenWidth - border - size)
+                if(x + speed > ScreenWidth - border)
                     return false;
+                break;
         }
 
     // Verify y coordinate
@@ -641,11 +746,13 @@ bool is_border(int x, int y, int size, char x_sign, char y_sign)
         switch(y_sign)
         {
             case '-':
-                if(y - size < border)
+                if(y - speed < border)
                     return false;
+                break;
             case '+':
-                if(y + size > ScreenHeight - border - size)
+                if(y + speed > ScreenHeight - border)
                     return false;
+                break;
         }
 
     return true;
@@ -655,64 +762,184 @@ bool is_border(int x, int y, int size, char x_sign, char y_sign)
  * Control the behavior of bacterium
  * Every time it used a new random number
 */
-void bacterium_behavior(int *x, int *y, int rand_num, int size)
+int bacterium_moving(int *x, int *y, int rand_num, int size, int speed)
 {
+    int temp_x = *x, temp_y = *y;
     // Get the temporal small control
     switch(rand_num)
     {
-        // Go to S-E else go S
+        // Every case describe where bacteria try to move
+        // Else means that bacteria, when meet wall try to move in another direction
+
+        // Go to N
         case 0:
-            if(is_border(*x, *y, size, '+', '+'))
-            {
-                *x += size;
-                *y += size;
-            }
-            else if(is_border(*x, *y, size, space, '+'))
-                *y += size;
+            if(is_border(*x, *y, size, speed, space, '-'))
+                *y -= speed;
             break;
 
-        // Go to N-E else go E
+        // Go to S
         case 1:
-            if(is_border(*x, *y, size, '+', '-'))
-            {
-                *x += size;
-                *y -= size;
-            }
-            else if(is_border(*x, *y, size, '+', space))
-                *x += size;
+            if(is_border(*x, *y, size, speed, space, '+'))
+                *y += speed;
             break;
 
-        // Go to S-V else go V
+        // Go to E
         case 2:
-            if(is_border(*x, *y, size, '-', '+'))
-            {
-                *x -= size;
-                *y += size;
-            }
-            else if(is_border(*x, *y, size, '-', space))
-                *x -= size;
+            if(is_border(*x, *y, size, speed, '+', space))
+                *x += speed;
             break;
 
-        // Go to N-E else go N
+        // Go to W
         case 3:
-            if(is_border(*x, *y, size, '-', '-'))
+            if(is_border(*x, *y, size, speed, '-', space))
+                *x -= speed;
+            break;
+
+        // Go to N-E
+        case 4:
+            if(is_border(*x, *y, size, speed, '+', '-'))
             {
-                *x -= size;
-                *y -= size;
+                *x += speed;
+                *y -= speed;
             }
-            else if(is_border(*x, *y, size, space, '-'))
-                *y -= size;
+            break;
+
+        // Go to N-W
+        case 5:
+            if(is_border(*x, *y, size, speed, '-', '-'))
+            {
+                *x -= speed;
+                *y -= speed;
+            }
+            break;
+
+        // Go to S-E
+        case 6:
+            if(is_border(*x, *y, size, speed, '+', '+'))
+            {
+                *x += speed;
+                *y += speed;
+            }
+            break;
+
+        // Go to S-W
+        case 7:
+            if(is_border(*x, *y, size, speed, '-', '+'))
+            {
+                *x -= speed;
+                *y += speed;
+            }
             break;
     }
+
+    // If switch states meet wall then need to transform DNA
+    // And return -1
+    if(temp_x == *x && temp_y == *y)
+        return (-1);
+    return 0;
 }
 
-void DNA_action_coord(int *action_coord, int *m, int *n)
+void DNA_action_coord(DNA curr_DNA, int *m, int *n)
 {
+    int position = curr_DNA.position,
+        height = curr_DNA.ma_height,
+        width = curr_DNA.ma_width;
     // Converting action coordinate in double variable's binary
-    *n = (*action_coord) % 2;
-    *m = (*action_coord) / 2 % 2;
+    *m = position / height;
+    *n = position % width;
+}
 
-    (*action_coord)++;
+char what_border(int x, int y, int size)
+{
+    // Up Border
+    if(y == border && x > border)
+        return 'U';
+    // Down Border
+    else if(y == (ScreenHeight - border) && x > border)
+        return 'D';
+    // Left Border
+    else if(x == border && y > border)
+        return 'L';
+    // Right Border
+    else if(x == (ScreenWidth - border) && y > border)
+        return 'R';
+
+    return 'C';
+}
+
+void transform_DNA(DNA temp_DNA, char name_border)
+{
+    DNA curr_DNA = temp_DNA;
+
+    /** Change directions in DNA
+        For N,S,E and W don't matter what border is
+    //----------------------------------------------
+        All wall:   Up and Down:    Left and Right:
+         N -> E      N-E -> S-E      N-E -> N-W
+         E -> S      N-W -> S-W      N-W -> N-E
+         S -> W      S-E -> N-E      S-E -> S-W
+         W -> N      S-W -> N-W      S-W -> S-E
+    //-----------------------------------------------**/
+
+    for(int i = 0; i < curr_DNA.ma_height; i++)
+        for(int j = 0; j < curr_DNA.ma_width; j++)
+            switch(curr_DNA.matrix[i][j])
+            {
+                // North
+                case 0:
+                    curr_DNA.matrix[i][j] = 1;
+                    break;
+
+                // South
+                case 1:
+                    curr_DNA.matrix[i][j] = 0;
+                    break;
+
+                // East
+                case 2:
+                    curr_DNA.matrix[i][j] = 3;
+                    break;
+
+                // West
+                case 3:
+                    curr_DNA.matrix[i][j] = 2;
+                    break;
+
+                // North-East
+                case 4:
+                    if(name_border == 'U' || name_border == 'D')
+                        curr_DNA.matrix[i][j] = 6;
+                    else if(name_border == 'L' || name_border == 'R')
+                        curr_DNA.matrix[i][j] = 5;
+                    break;
+
+                // North-West
+                case 5:
+                    if(name_border == 'U' || name_border == 'D')
+                        curr_DNA.matrix[i][j] = 7;
+                    else if(name_border == 'L' || name_border == 'R')
+                        curr_DNA.matrix[i][j] = 4;
+                    break;
+
+                // South-East
+                case 6:
+                    if(name_border == 'U' || name_border == 'D')
+                        curr_DNA.matrix[i][j] = 4;
+                    else if(name_border == 'L' || name_border == 'R')
+                        curr_DNA.matrix[i][j] = 7;
+                    break;
+
+                // South-East
+                case 7:
+                    if(name_border == 'U' || name_border == 'D')
+                        curr_DNA.matrix[i][j] = 5;
+                    else if(name_border == 'L' || name_border == 'R')
+                        curr_DNA.matrix[i][j] = 6;
+                    break;
+            }
+
+    curr_DNA.position--;
+    buff_obj->bacterium.DNA = curr_DNA;
 }
 
 int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size)
@@ -875,8 +1102,8 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
             frth_child = gen_DNA(ma_width, ma_height);
 
         // Create children's DNA structure
-        for(int i = 0; i < ma_width; i++)
-            for(int j = 0; j < ma_height; j++)
+        for(int i = 0; i < ma_height / 2; i++)
+            for(int j = 0; j < ma_width; j++)
             {
                 // Thirst child
                 thrs_child.matrix[i][j] = thrs_matrix[i][j];
@@ -907,9 +1134,6 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
             destr_object(objects, thrs_index);
             destr_object(objects, scnd_index);
 
-            //int temp_x = thrs_coord.x + size + 2;
-            //int temp_y = thrs_coord.y;
-
             // Determinate coordinates for third and forth children
             Coord_Reg thrd_coord = (Coord_Reg){.x = thrs_coord.x + size/ 2,
                                                .y = thrs_coord.y + size / 2,},
@@ -922,11 +1146,8 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
             add_child(world, objects, index, thrd_coord, thrd_child);
             add_child(world, objects, index, frth_coord, frth_child);
 
-            //print_obj(*objects);
-            //abort();
-
-            //printf("\nChildren are created!\n");
-
+            // Add 2 new bacteria in objects
+            bacteria_counter += 2;
     }
     else
     {
@@ -936,13 +1157,17 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
     }
 }
 
-void draw_bacterium_stats(int x, int y, int index, int size)
+void draw_bacterium_stats(int x, int y, int index, int health, int size)
 {
     char buffer[256];
     sprintf(buffer, "Index = %d", index);
 
     // Draw stats interface
     DrawRectangle(x, y - 50, 100, 50, BLACK);
+    DrawText(buffer, x + 5, y - 40, 14, WHITE);
+
+    // Draw health
+    sprintf(buffer, "Health = %d", health);
     DrawText(buffer, x + 5, y - 25, 14, WHITE);
 }
 
