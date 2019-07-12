@@ -2,10 +2,11 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <raylib.h>
-#define bacteria 'b'
-#define child    'c'
-#define food     'f'
-#define space    's'
+#define bacteria   'b'
+#define child      'c'
+#define generation 'g'
+#define food       'f'
+#define space      's'
 #define bacteria_color BLUE
 #define food_color     LIME
 
@@ -23,10 +24,11 @@ int food_energy = 100;
 
 // Number of start bacteria and food
 int food_counter = 1000;
-int bacteria_counter = 100;
+int bacteria_counter = 1000;
 
-// Pause button
-bool pause = true;
+// Exit and continue buttons
+bool continue_var = false;
+bool exit_var = false;
 //---------------------------------
 
 /*  Type of cells:
@@ -43,7 +45,6 @@ typedef struct
 // Simple DNA structure
 typedef struct
 {
-    char last_transform;
     int position;
     int ma_width;
     int ma_height;
@@ -65,7 +66,6 @@ typedef struct Type
 {
     char    type;
     int     index;
-    Color   color;
     union
     {
         micro_type    inanimate;
@@ -83,22 +83,31 @@ typedef struct
 }Coord_Reg;
 
 
-// Temp buff
-//--------------
-Type *buff_obj;
-//--------------
+// The buffer of the last object extract
+//--------------------------------------
+Type *buff_obj = NULL;
+//--------------------------------------
+
+// Verify if file exist or isn't empty
+bool verify_file(FILE *file);
+
+// Verify if mouse is in this range
+int IsMouseHere(int x, int y, int width, int height);
 
 // Main menu
 void menu();
+
+// Read object from file
+Type read_from_file(FILE *file);
 
 // Return a random number every frame
 int random(int n);
 
 // Add an object in list
-void add_object(Type **objects, int *index, char type);
+void add_object(Type **objects, int *index, char type, Type object);
 
 // Generate type
-void generate_type(int ***world, Type **objects, int *index, int n, char type);
+void generate_type(int ***world, Type **objects, int *index, int n, char type, Type object);
 
 // Genetics
 //-------------------------------------------------
@@ -107,6 +116,9 @@ DNA gen_DNA(int width, int height);
 
 // Extract object from list
 Type extract_by_index(Type **objects, int index);
+
+// When bacterium meet food the increase health
+void increase_health(Type **objects, int thrs_index, int scnd_index);
 
 // Destroy object
 void destr_object(Type **objects, int index);
@@ -121,6 +133,9 @@ void add_in_reg(Coord_Reg **reg, int x, int y);
 
 // Verify if coordinate are contains in register
 bool verify_reg(Coord_Reg *reg, int x, int y);
+
+// Verify if register contain just one element
+bool is_regiter_almost_empty(Coord_Reg *reg);
 //------------------------------------------------------------------
 
 // Verify if coordinates don't exit from world
@@ -140,17 +155,76 @@ char what_border(int x, int y, int size);
 void transform_DNA(DNA temp_DNA, char name_border);
 
 // Verify collision between two bacteria
-int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size);
+Type verify_collision(int ***world, Type **objects, Coord_Reg *scnd_coord, int i, int j, int size);
 
 // If bacterium meet another one then multiply
 void multiply(int ***world, Type **objects, int *index, Type thrs_parent, Coord_Reg thrs_coord,
                                                         Type scnd_parent, Coord_Reg scnd_coord);
 
+// Clear list from useless objects and keep last objects,
+// if it exist
+void garbage_collector(Type **objects, int last_index);
+
+// Write object to the file
+void write_in_file(FILE *file, Type object);
+
 // Draw statistic of selected bacteria
 void draw_bacterium_stats(int x, int y, int index, int health, int size);
 
+// Extras function
+//-----------------------------
 // Print list with objects
 void print_obj(Type *objects);
+
+
+// To sort
+//-------------------------------------------------------------------
+void print_obj_from_file(Type obj)
+{
+    if(obj.type != space)
+    {
+        printf("\nType = %c\n", obj.type);
+        printf("Size = %d\n", obj.bacterium.size);
+        printf("Speed = %d\n", obj.bacterium.speed);
+        printf("Color = %d\n", ColorToInt(obj.bacterium.color));
+        printf("DNA = (%d, %d)\n", obj.bacterium.DNA.ma_height,
+                               obj.bacterium.DNA.ma_width);
+        for(int i = 0; i < obj.bacterium.DNA.ma_height; i++)
+        {
+            for(int j = 0; j < obj.bacterium.DNA.ma_width; j++)
+                printf("%d ", obj.bacterium.DNA.matrix[i][j]);
+            printf("\n");
+        }
+    }
+    else
+        printf("File is empty or don't exist!");
+}
+
+void mutation(Type **object)
+{
+    int   rand_num;
+    Type *current = *object;
+    int  **matrix = current->bacterium.DNA.matrix;
+
+
+    DNA curr_DNA = current->bacterium.DNA;
+
+    // Every position from DNA's matrix have 5% for mutation,
+    // And 1% for logic mutation
+    for(int i = 0; i < curr_DNA.ma_height; i++)
+        for(int j = 0; j < curr_DNA.ma_width; j++)
+        {
+            rand_num = random(100) + 1;
+            if(!(rand_num % 20))
+            {
+                matrix[i][j] = random(8);
+                /*if(!(rand_num % 100))
+                    matrix[i][j] *= -1;*/
+            }
+        }
+}
+//-------------------------------------------------------------------
+
 
 // Main
 int main()
@@ -172,42 +246,45 @@ int main()
             world[i][j] = 0;
     //---------------------------------------------------------
 
+    // Initialize Window
+    InitWindow(ScreenWidth, ScreenHeight, "Pandora");
+    SetTargetFPS(30);
+
+    // Variables
+    //--------------------------------------------------
+    // Object's coordinate
+    int x, y;
+
     // List with objects
     Type *objects = NULL;
 
     // Objects Indexes
     int index = 1;
-
-    // Initialize Window
-    InitWindow(ScreenWidth, ScreenHeight, "Pandora");
-    SetTargetFPS(30);
-
-    // Generate bacteria and food
-    //----------------------------------------------------------
-    generate_type(&world, &objects, &index, food_counter, food);
-    generate_type(&world, &objects, &index, bacteria_counter, bacteria);
-    //----------------------------------------------------------
-
-    // Start with Main Menu
-    //menu();
-
-    // Temporal variables
-    //--------------------------------------------------
-    int   x, y;
-    int   temp;
+    // Temporal variable for swap
+    int temp;
 
     // Thirst and second object
     Type obj,
          scnd_obj;
 
-    int n = 0, m = 0;
+    // m and n response for matrix position in DNA
+    int m = 0,
+        n = 0;
+
+    // Index of second object
     int scnd_index = 0;
 
+    // If move is -1 it's means that bacteria
+    // need to transform she's DNA
     int move;
 
     // Statistics used for draw_bacterium_stats
+    //-----------------------------------------
     Type stats;
          stats.index = 0;
+
+    Coord_Reg stats_reg;
+    //-----------------------------------------
 
     // Thirst and second parent's coordinate
     Coord_Reg thrs_coord,
@@ -218,12 +295,39 @@ int main()
 
     // Bacteria's object
     type_bacteria obj_bacteria;
-    //--------------------------------------------------
 
     // Register
     Coord_Reg *reg = NULL;
+    //--------------------------------------------------
 
-    while(!WindowShouldClose())
+    // Start with Main Menu
+    menu();
+
+    // If continue button was pressed, then read object from file
+    //------------------------------------------------------------
+    if(continue_var)
+    {
+        FILE *file = fopen("output.txt", "r");
+        obj = read_from_file(file);
+        fclose(file);
+    }
+    else
+        obj.type = space;
+    //------------------------------------------------------------
+
+    // Generate bacteria and food
+    // If continue button was pressed then multiply last write member,
+    // else start new game with random members
+    //-----------------------------------------------------------------------------
+    generate_type(&world, &objects, &index, food_counter, food, obj);
+
+    if(obj.type == space)
+        generate_type(&world, &objects, &index, bacteria_counter, bacteria, obj);
+    else if(obj.type == bacteria || obj.type == child)
+        generate_type(&world, &objects, &index, bacteria_counter, generation, obj);
+    //-----------------------------------------------------------------------------
+
+    while(!WindowShouldClose() && !exit_var)
     {
         BeginDrawing();
             ClearBackground(WHITE);
@@ -252,65 +356,35 @@ int main()
                                                                                                    obj_bacteria.speed);
 
 
-
-                                    if(move == -1 && obj_bacteria.DNA.last_transform != what_border(x, y, obj_bacteria.size))
+                                    if(move == -1)// && obj_bacteria.DNA.last_transform != what_border(x, y, obj_bacteria.size))
                                         transform_DNA(obj_bacteria.DNA, what_border(x, y, obj_bacteria.size));
 
                                     // Collision and multiply
                                     //-------------------------------------------------
 
                                     // Extract the secondary index with which the first object interacts
-                                    scnd_index = verify_collision(world, &scnd_coord, i, j, x, y, obj_bacteria.size);
+                                    scnd_obj = verify_collision(&world, &objects, &scnd_coord, i, j, obj_bacteria.size);
 
-
-                                    // Work with last member
-                                    //-----------------------------------------------------------
-                                    if(bacteria_counter == 1)
-                                    {
-                                        for(int s = 0; s < obj_bacteria.DNA.ma_width; s++)
-                                        {
-                                            printf("\n");
-                                            for(int t = 0; t < obj_bacteria.DNA.ma_height; t++)
-                                                printf("%d ", obj_bacteria.DNA.matrix[s][t]);
-                                        }
-                                        printf("\nIndex = (%d)", world[i][j]);
-                                        abort();
-                                    }
-
-                                    //-----------------------------------------------------------
-
-                                    if(scnd_index >= 0)
+                                    // If second object is bacteria then multiply
+                                    if(obj.type == bacteria && scnd_obj.type == bacteria)
                                     {
                                         // Coordinate of thirst object
                                         thrs_coord = (Coord_Reg){.x = i,
                                                                  .y = j};
 
-                                        // Extract second object
-                                        scnd_obj = extract_by_index(&objects, scnd_index);
-
-                                        // If bacteria meets food then increase his health
-                                        if(scnd_obj.type == food)
-                                        {
-                                            increase_health(&objects, world[i][j]);
-                                            destr_object(&objects, scnd_index);
-                                            food_counter--;
-                                        }
-
-                                        // If second object is bacteria then multiply
-                                        if(obj.type == bacteria && scnd_obj.type == bacteria)
-                                            multiply(&world, &objects, &index, obj,      thrs_coord,
-                                                                               scnd_obj, scnd_coord);
-
-                                        //-------------------------------------------------
-
-                                        // If bacterium health <= 0 then destroy object
-                                        if(obj_bacteria.health <= 0)
-                                        {
-                                            destr_object(&objects, world[i][j]);
-                                            bacteria_counter--;
-                                        }
-
+                                        multiply(&world, &objects, &index, obj,      thrs_coord,
+                                                                           scnd_obj, scnd_coord);
                                     }
+
+                                    //-------------------------------------------------
+
+                                    // If bacterium health <= 0 then destroy object
+                                    if(obj_bacteria.health <= 0 )
+                                    {
+                                        destr_object(&objects, world[i][j]);
+                                        world[i][j] = 0;
+                                    }
+
 
                                     DrawRectangle(x, y, obj_bacteria.size, obj_bacteria.size, obj_bacteria.color);
 
@@ -322,28 +396,66 @@ int main()
                                 }
 
                                 // Draw bacterium statistics
-                                //-----------------------------------------------------------------
+                                //----------------------------------------------------------------------------
                                 if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
                                     if(IsMouseHere(x - 4, y - 4, 10, 10))
                                     {
-                                        stats.index = world[x][y];
-                                        stats.bacterium = obj_bacteria;
+                                        stats = obj;
+                                        stats_reg = (Coord_Reg) {.x = x,
+                                                                 .y = y};
                                     }
 
-                                if(world[x][y] == stats.index && stats.index != 0)
-                                    draw_bacterium_stats(x, y, stats.index, obj_bacteria.health, 3);
-                                //-----------------------------------------------------------------
+                                if(obj.index == stats.index)
+                                {
+                                    stats = obj;
+                                    stats_reg = (Coord_Reg) {.x = x,
+                                                             .y = y};
+
+                                    if(world[stats_reg.x][stats_reg.y] == 0)
+                                        stats.index = 0;
+                                }
+
+                                if(stats.index != 0)
+                                    draw_bacterium_stats(stats_reg.x,
+                                                         stats_reg.y, stats.index, stats.bacterium.health, 3);
+                                //----------------------------------------------------------------------------
                             }
                     }
 
-            // Every time generate food
-            if(food_counter < 1500)
+            if(is_regiter_almost_empty(reg))
             {
-                generate_type(&world, &objects, &index, 1, food);
+                // Clear object's list from useless objects
+                garbage_collector(&objects, buff_obj->index);
+
+                // If the last object was destroyed before
+                // it was written to the file then rewrite in file
+                if(bacteria_counter == 1)
+                {
+                    FILE *file = fopen("output.txt", "w");
+                    write_in_file(file, *buff_obj);
+                    fclose(file);
+                }
+                // Else read object from file and create generation
+                else
+                {
+                    FILE *file = fopen("output.txt", "r");
+                    *buff_obj = read_from_file(file);
+                    fclose(file);
+                }
+
+                bacteria_counter += 1000;
+                generate_type(&world, &objects, &index, 1000, generation, *buff_obj);
+            }
+            else
+                free_reg(&reg);
+
+
+            // Every time generate food
+            if(food_counter < 1000)
+            {
+                generate_type(&world, &objects, &index, 1, food, obj);
                 food_counter++;
             }
-
-            free_reg(&reg);
 
             DrawFPS(10, 10);
         EndDrawing();
@@ -351,9 +463,7 @@ int main()
 
     // De-Initialization
     //-----------------------------------------------
-
     CloseWindow();
-
     //-----------------------------------------------
 
     // Free variables
@@ -370,6 +480,7 @@ int main()
         free_object(objects);
         current = cursor;
     }
+    objects = NULL;
     //-----------------------------------------------
 
     return 0;
@@ -388,11 +499,25 @@ int IsMouseHere(int x, int y, int width, int height)
     return 0;
 }
 
+bool verify_file(FILE *file)
+{
+    // Verify if file exit
+    if(file == NULL)
+        return false;
+
+    // Verify if file is empty
+    fseek(file, 0, SEEK_END);
+    if(ftell(file) == 0)
+        return false;
+    else
+        fseek(file, 0, SEEK_SET);
+
+    return true;
+}
+
 // Main Menu
 void menu()
 {
-    Color btn_color;
-
     Image img = LoadImage("image.jpg");
 
     Texture2D btn_texture = LoadTextureFromImage(img);
@@ -405,42 +530,142 @@ void menu()
 
             ClearBackground(WHITE);
 
-            // Draw start button
-            //----------------------------------------------
-            if(IsMouseHere(100, 400, img.width, img.height))
-                btn_color = WHITE;
-            else
-                btn_color = BLUE;
 
-            DrawTexture(btn_texture, 100, 400, btn_color);
-            //----------------------------------------------
+            // Draw start button
+            //----------------------------------------------------------------------------------
+            DrawText("Start Game", ScreenHeight / 2 - 170, ScreenWidth / 2 - 50, 20, GRAY);
+            if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 - 70, 196, 60))
+            {
+                DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 - 70, 196, 60, GRAY);
+                DrawText("Start Game", ScreenHeight / 2 - 170, ScreenWidth / 2 - 50, 20, WHITE);
+            }
+            //----------------------------------------------------------------------------------
+
+            // Draw continue button
+            //-------------------------------------------------------------------------------------
+            DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, GRAY);
+            if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60))
+            {
+                DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60, GRAY);
+                DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, WHITE);
+            }
+            //-------------------------------------------------------------------------------------
+
+            // Draw options button
+            //-------------------------------------------------------------------------------------
+            DrawText("Options", ScreenHeight / 2 - 150, ScreenWidth / 2 + 70, 20, GRAY);
+            if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 + 50, 196, 60))
+            {
+                DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 + 50, 196, 60, GRAY);
+                DrawText("Options", ScreenHeight / 2 - 150, ScreenWidth / 2 + 70, 20, WHITE);
+            }
+            //-------------------------------------------------------------------------------------
 
             // Draw exit button
-            //----------------------------------------------
-            if(IsMouseHere(300, 400, 200, 100))
-                btn_color = BLUE;
-            else
-                btn_color = RED;
+            //-----------------------------------------------------------------------------
+            DrawText("Exit", ScreenHeight / 2 - 134, ScreenWidth / 2 + 130, 20, GRAY);
+            if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 + 110, 196, 60))
+            {
+                DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 + 110, 196, 60, GRAY);
+                DrawText("Exit", ScreenHeight / 2 - 134, ScreenWidth / 2 + 130, 20, WHITE);
+            }
+            //-----------------------------------------------------------------------------
 
-            DrawRectangle(300, 400, 200, 100, btn_color);
-            //----------------------------------------------
+            // Display version's number
+            //-------------------------------------
+            DrawText("1.3.8.3", ScreenWidth - 75, ScreenHeight - 50, 16, GRAY);
+            //-------------------------------------
 
         EndDrawing();
 
-
-
-        // If Mouse Right Button was pressed start button then go to game
-        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && IsMouseHere(100, 400, img.width, img.height))
+        // If new game button was pressed then start new game
+        //---------------------------------------------------------------------
+        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+            IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 - 70, 196, 80))
             break;
+        //---------------------------------------------------------------------
 
-        // If Mouse Right Button was pressed exit button then go exit game
-        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && IsMouseHere(300, 400, 200, 100))
-            CloseWindow();
+        // If continue game button was pressed then continue last game
+        //---------------------------------------------------------------------
+        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+            IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 + 10, 196, 80))
+            {
+                continue_var = true;
+                break;
+            }
+        //---------------------------------------------------------------------
+
+        // If exit button was pressed then exit from game
+        //--------------------------------------------------------------------
+        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+           IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 + 90, 196, 80))
+        {
+            exit_var = true;
+            break;
+        }
+        //--------------------------------------------------------------------
     }
 
     // De-Initialization
     //------------------------------------------------------
     UnloadTexture(btn_texture);
+}
+
+Type read_from_file(FILE *file)
+{
+    // Variables
+    //-----------------------
+    int IntColor;
+    int size, speed,
+        height, width;
+
+    int **matrix;
+
+    DNA curr_DNA;
+
+    Type object;
+         object.type = space;
+    //-----------------------
+
+    // Read from file
+    //---------------------------------------------------
+    if(!verify_file(file))
+        return object;
+
+    fscanf(file, "%c\n", &object.type);
+    fscanf(file, "%d\n", &IntColor);
+    fscanf(file, "%d\n", &size);
+    fscanf(file, "%d\n", &speed);
+    fscanf(file, "%d %d\n", &height, &width);
+
+    // Allocate memory to matrix
+    //------------------------------------------
+    matrix = malloc(sizeof(int) * height);
+
+    for(int i = 0; i < height; i++)
+    {
+        matrix[i] = malloc(sizeof(int) * width);
+        for(int j = 0; j < width; j++)
+            fscanf(file, "%d ", &matrix[i][j]);
+        fscanf(file, "\n");
+    }
+    //------------------------------------------
+
+    //----------------------------------------------------
+
+    // Save information in object
+    //----------------------------------------------------
+    curr_DNA = (DNA) {.ma_height = height,
+                      .ma_width = width,
+                      .matrix = matrix};
+
+    object.bacterium = (type_bacteria) {.size = size,
+                                        .speed = speed,
+                                        .color = GetColor(IntColor),
+                                        .DNA = curr_DNA};
+    //----------------------------------------------------
+
+    return object;
 }
 
 /*
@@ -472,11 +697,46 @@ int random(int n)
     }
 }
 
-void add_object(Type **objects, int *index, char type)
+void cpy_object(Type **current, Type object)
+{
+    // Variables
+    //-------------------------------------------
+    Type *scnd_obj = *current;
+    int   height = object.bacterium.DNA.ma_height,
+          width  = object.bacterium.DNA.ma_width;
+    //-------------------------------------------
+
+    // Allocate memory and copy object matrix
+    //------------------------------------------------------
+    int  **matrix = malloc(sizeof(int*) * height);
+    for(int i = 0; i < height; i++)
+    {
+        matrix[i] = malloc(sizeof(int) * width);
+        for(int j = 0; j < width; j++)
+            matrix[i][j] = object.bacterium.DNA.matrix[i][j];
+    }
+    //------------------------------------------------------
+
+    // Save current object
+    //-------------------------------------------------------------------------
+    scnd_obj->type = bacteria;
+    scnd_obj->bacterium = (type_bacteria) {.health = 100,
+                                           .size   = 4,
+                                           .speed  = object.bacterium.speed,
+                                           .color  = object.bacterium.color,
+                                           .DNA    = (DNA) {.ma_height = height,
+                                                            .ma_width  = width,
+                                                            .matrix    = matrix}
+                                           };
+    *current = scnd_obj;
+    //-------------------------------------------------------------------------
+}
+
+void add_object(Type **objects, int *index, char type, Type object)
 {
     Type *current = malloc(sizeof(Type));
+          current->index = *index;
 
-    current->index = *index;
     if(type == food)
     {
         current->type = food;
@@ -485,22 +745,32 @@ void add_object(Type **objects, int *index, char type)
     else if(type == bacteria)
     {
         current->type = bacteria;
-        current->bacterium = (type_bacteria) {.health = 1000,
+        current->bacterium = (type_bacteria) {.health = 100,
                                               .speed = 1,
                                               .size = 4,
                                               .color = bacteria_color,
                                               .DNA = gen_DNA(8, 8)};
     }
+    // When we create generation copy object in every member,
+    // And add some mutation
+    else if(type == generation)
+    {
+        cpy_object(&current, object);
+        mutation(&current);
+    }
 
+    // Save current object
+    //---------------------------
     if(*objects == NULL)
         current->next = NULL;
     else
         current->next = *objects;
 
     *objects = current;
+    //---------------------------
 }
 
-void generate_type(int ***world, Type **objects, int *index, int n, char type)
+void generate_type(int ***world, Type **objects, int *index, int n, char type, Type object)
 {
     int x, y;
     int **new_world = *world;
@@ -514,8 +784,7 @@ void generate_type(int ***world, Type **objects, int *index, int n, char type)
         }
         while(new_world[x][y] != 0);
 
-        add_object(objects, index, type);
-
+        add_object(objects, index, type, object);
         // If bacterium is create in border space then
         // Increments it with border
         if(x < border)
@@ -536,12 +805,12 @@ DNA gen_DNA(int width, int height)
     DNA DNA;
     DNA.position = -1;
     DNA.ma_width = width,  DNA.ma_height = height;
-    DNA.matrix = malloc(sizeof(int*) * height);
 
-    for(int i = 0; i < width; i++)
+    DNA.matrix = malloc(sizeof(int*) * height);
+    for(int i = 0; i < height; i++)
     {
         DNA.matrix[i] = malloc(sizeof(int) * width);
-        for(int j = 0; j < height; j++)
+        for(int j = 0; j < width; j++)
             DNA.matrix[i][j] = random(8);
     }
 
@@ -570,10 +839,17 @@ void add_child(int ***world, Type **objects, int *index, Coord_Reg coord, DNA ch
     *objects = current;
     //-------------------------------------------------------
 
+    // Save world
+    //------------------------------------
     new_world[coord.x][coord.y] = *index;
     *world = new_world;
+    //------------------------------------
 
+    // Increase counters
+    //------------------
+    bacteria_counter++;
     (*index)++;
+    //------------------
 }
 
 Type extract_by_index(Type **objects, int index)
@@ -594,44 +870,57 @@ Type extract_by_index(Type **objects, int index)
     {
         // Move position
         current->bacterium.DNA.position++;
-        if(current->bacterium.DNA.position == current->bacterium.DNA.ma_height *
+        if(current->bacterium.DNA.position >= current->bacterium.DNA.ma_height *
                                               current->bacterium.DNA.ma_width)
             current->bacterium.DNA.position = 0;
+
+        // Save current object in buffer
+        buff_obj = current;
 
         // Decrementation health
         current->bacterium.health--;
     }
 
     indexed_object = *current;
-    buff_obj = current;
 
     return indexed_object;
 }
 
-void increase_health(Type **objects, int index)
+void increase_health(Type **objects, int thrs_index, int scnd_index)
 {
-    Type *current = *objects;
+    Type *current = buff_obj;
 
-    while(current != NULL && current->index != index)
-        current = current->next;
+    // If there is another object in the buffer,
+    // then we retrieve the object by index
+    if(current != NULL && current->index != thrs_index)
+    {
+        current = *objects;
+        while(current != NULL && current->index != thrs_index)
+            current = current->next;
+    }
 
-    if(current != NULL && current->index == index)
+    // Increase health
+    if(current != NULL && current->index == thrs_index)
         current->bacterium.health += food_energy;
 
-    // If child increase his health to 400 then
+    // If child increase his health to 400,
+    // then he become a bacterium
     if(current->type == child && current->bacterium.health >= 400)
     {
         current->type = bacteria;
-        current->color = BLACK;
         current->bacterium.size = 4;
     }
+
+    // Destroy food object
+    destr_object(objects, scnd_index);
 }
 
 void destr_object(Type **objects, int index)
 {
-    Type *current = *objects,
-         *prev = NULL;
+    Type *prev, *current;
+          prev = current = *objects;
 
+    // If indexed object is thirst in list
     if((*objects)->index == index)
     {
         prev = *objects;
@@ -640,14 +929,15 @@ void destr_object(Type **objects, int index)
     }
     else
     {
-        prev = current;
-
+        // Until we find the index object or the end of the list,
+        // try to find the indexed list.
         while(current->next != NULL && current->index != index)
         {
             prev = current;
             current = current->next;
         }
 
+        // If we found indexed object and it's the last member
         if(current->next == NULL && current->index == index)
         {
             prev->next = NULL;
@@ -655,6 +945,8 @@ void destr_object(Type **objects, int index)
             return;
         }
 
+        // If the found indexed object is between
+        // the head and the tail of the list
         if(current->index == index)
         {
             prev->next = current->next;
@@ -663,15 +955,21 @@ void destr_object(Type **objects, int index)
     }
 }
 
+
+
 void free_object(Type *object)
 {
-    if(object->type == bacteria)
+    if(object->type == bacteria || object->type == child)
     {
         DNA DNA = object->bacterium.DNA;
         for(int i = 0; i < DNA.ma_height; i++)
             free(DNA.matrix[i]);
         free(DNA.matrix);
+
+        bacteria_counter--;
     }
+    else if(object->type == food)
+        food_counter--;
 
     free(object);
 }
@@ -702,6 +1000,14 @@ bool verify_reg(Coord_Reg *reg, int x, int y)
 
         reg = reg->next;
     }
+
+    return false;
+}
+
+bool is_regiter_almost_empty(Coord_Reg *reg)
+{
+    if(reg->next == NULL)
+        return true;
 
     return false;
 }
@@ -844,9 +1150,12 @@ void DNA_action_coord(DNA curr_DNA, int *m, int *n)
     int position = curr_DNA.position,
         height = curr_DNA.ma_height,
         width = curr_DNA.ma_width;
-    // Converting action coordinate in double variable's binary
+
+    // Converting number in matrix's index
+    //------------------------------------
     *m = position / height;
     *n = position % width;
+    //------------------------------------
 }
 
 char what_border(int x, int y, int size)
@@ -942,127 +1251,48 @@ void transform_DNA(DNA temp_DNA, char name_border)
     buff_obj->bacterium.DNA = curr_DNA;
 }
 
-int verify_collision(int **world, Coord_Reg *scnd_coord, int i, int j, int x, int y, int size)
+Type verify_collision(int ***world, Type **objects, Coord_Reg *scnd_coord, int i, int j, int size)
 {
-    // Coordinate differentiation responds for the directions
-    int diff_x = x - i;
-    int diff_y = y - j;
-    int temp_i, temp_j;
+    Type scnd_obj;
+    int **new_world = *world;
 
-    if(diff_x == 0 && diff_y == 0)
-        return 0;
-
-    // When bacteria go to EAST/West
-    // Verify if is collision with right/left border
-    // Verify left/right border plus extra (size-1) pixels Up and down
-    if(diff_y == 0)
-    {
-        // Go to superior extreme (j - size)
-        j -= (size - 1);
-
-        // Go to right/left extreme
-        if(diff_x > 0)
-            i += size;
-        else if(diff_x < 0)
-            i -= size;
-
-        for(int m = 0; m < size*2 - 1; m++)
-            if(world[i][j + m] != 0)
-            {
-                //DrawRectangle(i - 2, j + m - 2, 5, 5, RED);
-                *scnd_coord = (Coord_Reg){.x = i,
-                                          .y = j + m};
-                return world[i][j + m];
-            }
-    }
-    // When bacteria go to North/South
-    // Verify if to the up/down border is collision
-    // Verify down/up border plus extra (size-1) pixels right and left
-    else if(diff_x == 0)
-    {
-        // Go to left extreme (i - size)
-        i -= (size - 1);
-
-        // Go to right/left extreme
-        if(diff_y > 0)
-            j += size;
-        else if(diff_y < 0)
-            j -= size;
-
-        for(int m = 0; m < size*2 - 1; m++)
-            if(world[i + m][j] != 0)
-            {
-                //DrawRectangle(i + m - 2, j - 2, 5, 5, RED);
-                *scnd_coord = (Coord_Reg){.x = i + m,
-                                          .y = j};
-                return world[i + m][j];
-            }
-    }
-
-    //When bacteria go to North-East/North-West
-    else if(diff_y > 0)
-    {
-        if(diff_x > 0)
+    for(int x = i; x < size + i; x++)
+        for(int y = j; y < size + j; y++)
         {
-            temp_i = i + 1, temp_j = j + size;
-            i += size,      j++;
-        }
-        else if(diff_x < 0)
-        {
-            temp_i = i - size, temp_j = j - 1;
-            i -= size,         j -= size;
+            // Skip object index
+            if(x == i && y == j)
+                continue;
+
+            if(new_world[x][y] != 0)
+            {
+                scnd_obj = extract_by_index(objects, new_world[x][y]);
+
+                if(scnd_obj.type == food)
+                {
+                    increase_health(objects, new_world[i][j], scnd_obj.index);
+                    new_world[x][y] = 0;
+                }
+                else if(scnd_obj.type == bacteria)
+                {
+                    *scnd_coord = (Coord_Reg){.x = x,
+                                              .y = y};
+
+                    // Save world
+                    *world = new_world;
+
+                    // Return second object
+                    return scnd_obj;
+                }
+            }
         }
 
-        for(int m = 0; m < (size * 2 - 1); m++)
-            if(world[i][j + m] != 0)
-            {
-                //DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                *scnd_coord = (Coord_Reg){.x = i,
-                                          .y = j + m};
-                return world[i][j + m];
-            }
-            else if(world[i + m][j] != 0)
-            {
-                //DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                *scnd_coord = (Coord_Reg){.x = i + m,
-                                          .y = j};
-                return world[i + m][j];
-            }
-    }
+    // Save world
+    *world = new_world;
 
-    // When bacteria go to South-East/South-West
-    else if(diff_x > 0)
-    {
-        if(diff_y > 0)
-        {
-            temp_i = i + 1, temp_j = j + size;
-            i += size,      j++;
-        }
-        else if(diff_y < 0)
-        {
-            temp_i = i - size, temp_j = j - 1;
-            i -= size,      j -= size;
-        }
-
-        for(int m = 0; m < (size * 2 - 1); m++)
-            if(world[i][j + m] != 0)
-            {
-                //DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                *scnd_coord = (Coord_Reg){.x = i,
-                                          .y = j + m};
-                return world[i][j + m];
-            }
-            else if(world[i + m][j] != 0)
-            {
-                //DrawRectangle(i - 2, j + m - 2, 10, 10, RED);
-                *scnd_coord = (Coord_Reg){.x = i + m,
-                                          .y = j};
-                return world[i + m][j];
-            }
-    }
-
-    return 0;
-
+    // If don't have collision with another bacteria
+    // Then return object with space type
+    scnd_obj.type = space;
+    return scnd_obj;
 }
 
 void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg thrs_coord,
@@ -1135,9 +1365,9 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
             destr_object(objects, scnd_index);
 
             // Determinate coordinates for third and forth children
-            Coord_Reg thrd_coord = (Coord_Reg){.x = thrs_coord.x + size/ 2,
+            Coord_Reg thrd_coord = (Coord_Reg){.x = thrs_coord.x + size / 2,
                                                .y = thrs_coord.y + size / 2,},
-                      frth_coord = (Coord_Reg){.x = scnd_coord.x + size / 2 ,
+                      frth_coord = (Coord_Reg){.x = scnd_coord.x + size / 2,
                                                .y = scnd_coord.y + size / 2,};
 
             // Add children in object's list
@@ -1145,15 +1375,68 @@ void multiply(int ***world, Type **objects, int *index, Type thrs_obj, Coord_Reg
             add_child(world, objects, index, scnd_coord, scnd_child);
             add_child(world, objects, index, thrd_coord, thrd_child);
             add_child(world, objects, index, frth_coord, frth_child);
-
-            // Add 2 new bacteria in objects
-            bacteria_counter += 2;
     }
     else
     {
         printf("\nError at multiply!\n");
         printf("Parents don't have the same sizes\n");
         return;
+    }
+}
+
+void garbage_collector(Type **objects, int last_index)
+{
+    Type *cursor, *current;
+          cursor = current = *objects;
+
+    while(*objects != NULL)
+    {
+        if(((*objects)->type == bacteria || (*objects)->type == child) &&
+            (*objects)->index != last_index)
+        {
+            cursor = (*objects)->next;
+            free_object(objects);
+            *objects = cursor;
+            bacteria_counter--;
+        }
+        else
+            break;
+    }
+
+    current = cursor;
+    while(cursor->next != NULL)
+    {
+        if((cursor->next->type == bacteria || cursor->next->type == child) &&
+            cursor->next->index != last_index)
+        {
+            current = cursor->next;
+            cursor->next = current->next;
+            free_object(current);
+        }
+        else
+            cursor = cursor->next;
+    }
+}
+
+void write_in_file(FILE *file, Type object)
+{
+    int IntColor = ColorToInt(object.bacterium.color);
+
+    // Write object type in file
+    fprintf(file, "%c\n", object.type);
+
+    // Write object information in file
+    fprintf(file, "%d\n", IntColor);
+    fprintf(file, "%d\n", object.bacterium.size);
+    fprintf(file, "%d\n", object.bacterium.speed);
+    fprintf(file, "%d %d\n", object.bacterium.DNA.ma_height,
+                             object.bacterium.DNA.ma_width);
+    for(int i = 0; i < object.bacterium.DNA.ma_height; i++)
+    {
+        for(int j = 0; j < object.bacterium.DNA.ma_width; j++)
+            fprintf(file, "%d ", object.bacterium.DNA.matrix[i][j]);
+        fprintf(file, "\n");
+
     }
 }
 
