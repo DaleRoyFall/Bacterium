@@ -27,6 +27,7 @@ int food_counter = 1000;
 int bacteria_counter = 1000;
 
 // Exit and continue buttons
+bool isobjectempty = false;
 bool continue_var = false;
 bool exit_var = false;
 //---------------------------------
@@ -168,38 +169,23 @@ void garbage_collector(Type **objects, int last_index);
 // Write object to the file
 void write_in_file(FILE *file, Type object);
 
+// Draw generation counter
+void draw_generation(gen_counter);
+
 // Draw statistic of selected bacteria
 void draw_bacterium_stats(int x, int y, int index, int health, int size);
 
 // Extras function
-//-----------------------------
+//--------------------------------------------------
 // Print list with objects
 void print_obj(Type *objects);
 
+// Print the object that was extracted from the file
+void print_obj_from_file(Type obj);
+//--------------------------------------------------
 
-// To sort
+// To sort(not ended)
 //-------------------------------------------------------------------
-void print_obj_from_file(Type obj)
-{
-    if(obj.type != space)
-    {
-        printf("\nType = %c\n", obj.type);
-        printf("Size = %d\n", obj.bacterium.size);
-        printf("Speed = %d\n", obj.bacterium.speed);
-        printf("Color = %d\n", ColorToInt(obj.bacterium.color));
-        printf("DNA = (%d, %d)\n", obj.bacterium.DNA.ma_height,
-                               obj.bacterium.DNA.ma_width);
-        for(int i = 0; i < obj.bacterium.DNA.ma_height; i++)
-        {
-            for(int j = 0; j < obj.bacterium.DNA.ma_width; j++)
-                printf("%d ", obj.bacterium.DNA.matrix[i][j]);
-            printf("\n");
-        }
-    }
-    else
-        printf("File is empty or don't exist!");
-}
-
 void mutation(Type **object)
 {
     int   rand_num;
@@ -298,20 +284,24 @@ int main()
 
     // Register
     Coord_Reg *reg = NULL;
+
+    // Generation counter
+    int gen_counter = 0;
     //--------------------------------------------------
+
+    // Read object from file
+    //------------------------------------
+    FILE *file = fopen("output.txt", "r");
+    obj = read_from_file(file);
+    fclose(file);
+    //------------------------------------
 
     // Start with Main Menu
     menu();
 
     // If continue button was pressed, then read object from file
     //------------------------------------------------------------
-    if(continue_var)
-    {
-        FILE *file = fopen("output.txt", "r");
-        obj = read_from_file(file);
-        fclose(file);
-    }
-    else
+    if(!continue_var)
         obj.type = space;
     //------------------------------------------------------------
 
@@ -331,6 +321,7 @@ int main()
     {
         BeginDrawing();
             ClearBackground(WHITE);
+            draw_generation(gen_counter);
 
             for(int i = 0; i < ScreenWidth; i++)
                 for(int j = 0; j < ScreenHeight; j++)
@@ -443,6 +434,7 @@ int main()
                     fclose(file);
                 }
 
+                gen_counter++;
                 bacteria_counter += 1000;
                 generate_type(&world, &objects, &index, 1000, generation, *buff_obj);
             }
@@ -543,11 +535,16 @@ void menu()
 
             // Draw continue button
             //-------------------------------------------------------------------------------------
-            DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, GRAY);
-            if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60))
+            if(isobjectempty)
+                DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, LIGHTGRAY);
+            else
             {
-                DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60, GRAY);
-                DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, WHITE);
+                DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, GRAY);
+                if(IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60))
+                {
+                    DrawRectangle(ScreenHeight / 2 - 210, ScreenWidth / 2 - 10, 196, 60, GRAY);
+                    DrawText("Continue Game", ScreenHeight / 2 - 180, ScreenWidth / 2 + 10, 20, WHITE);
+                }
             }
             //-------------------------------------------------------------------------------------
 
@@ -587,7 +584,7 @@ void menu()
 
         // If continue game button was pressed then continue last game
         //---------------------------------------------------------------------
-        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+        if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && !isobjectempty &&
             IsMouseHere(ScreenHeight / 2 - 210, ScreenWidth / 2 + 10, 196, 80))
             {
                 continue_var = true;
@@ -630,7 +627,10 @@ Type read_from_file(FILE *file)
     // Read from file
     //---------------------------------------------------
     if(!verify_file(file))
+    {
+        isobjectempty = true;
         return object;
+    }
 
     fscanf(file, "%c\n", &object.type);
     fscanf(file, "%d\n", &IntColor);
@@ -1440,6 +1440,14 @@ void write_in_file(FILE *file, Type object)
     }
 }
 
+void draw_generation(gen_counter)
+{
+    char buff[256];
+    sprintf(buff, "Gen %d", gen_counter);
+
+    DrawText(buff, ScreenWidth - 56, 6, 18, GRAY);
+}
+
 void draw_bacterium_stats(int x, int y, int index, int health, int size)
 {
     char buffer[256];
@@ -1462,4 +1470,25 @@ void print_obj(Type *objects)
         objects = objects->next;
     }
     printf("\n");
+}
+
+void print_obj_from_file(Type obj)
+{
+    if(obj.type != space)
+    {
+        printf("\nType = %c\n", obj.type);
+        printf("Size = %d\n", obj.bacterium.size);
+        printf("Speed = %d\n", obj.bacterium.speed);
+        printf("Color = %d\n", ColorToInt(obj.bacterium.color));
+        printf("DNA = (%d, %d)\n", obj.bacterium.DNA.ma_height,
+                               obj.bacterium.DNA.ma_width);
+        for(int i = 0; i < obj.bacterium.DNA.ma_height; i++)
+        {
+            for(int j = 0; j < obj.bacterium.DNA.ma_width; j++)
+                printf("%d ", obj.bacterium.DNA.matrix[i][j]);
+            printf("\n");
+        }
+    }
+    else
+        printf("File is empty or don't exist!");
 }
